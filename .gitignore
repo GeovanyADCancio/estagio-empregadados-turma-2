@@ -1,0 +1,19 @@
+# Credenciais
+.env
+.env.*
+*.env
+!.env.example
+
+# Databricks / notebooks checkpoints
+.ipynb_checkpoints/
+.databricks/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# SO
+.DS_Store
+Thumbs.db
