@@ -1,9 +1,11 @@
 # Ambiente virtual
 .venv/
+venv/
 
 # Variáveis de ambiente e credenciais
 .env
 .env.*
+*.env
 !.env.example
 
 # Python
@@ -12,8 +14,9 @@ __pycache__/
 *$py.class
 *.so
 
-# Jupyter
+# Jupyter / Databricks
 .ipynb_checkpoints/
+.databricks/
 
 # VS Code
 .vscode/
