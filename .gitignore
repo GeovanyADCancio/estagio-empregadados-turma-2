@@ -31,3 +31,5 @@ Thumbs.db
 .env
 .env.*
 *.env
+
+SECOND_BRAIN.md
