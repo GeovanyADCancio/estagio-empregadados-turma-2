@@ -1,14 +1,24 @@
-# Squad 2 - Real Time for Business
+# 🚀 Squad 2 - Real Time for Business
 
-## Análise Exploratória - `ecommerce_pedidos`
+# Análise Exploratória de Dados - `ecommerce_pedidos`
 
-Projeto desenvolvido durante o estágio de Engenharia de Dados com objetivo de validar o fluxo de dados ponta a ponta utilizando Azure Data Lake Storage Gen2, Databricks, análise exploratória e SQL Server.
+Projeto desenvolvido durante o estágio de Engenharia de Dados com objetivo de validar o fluxo completo de dados, desde a ingestão no Azure Data Lake Storage Gen2 até a disponibilização dos dados para análise no SQL Server.
+
+O projeto contempla:
+
+- carregamento de dados históricos;
+- processamento de eventos em tempo real;
+- análise exploratória dos dados;
+- validação da qualidade;
+- geração de indicadores de negócio;
+- persistência da tabela consolidada.
 
 ---
 
 # 👥 Equipe
 
-**Squad:** 2 - Real Time for Business  
+**Squad:** 2 - Real Time for Business
+
 **Dupla:** 3
 
 **Integrantes:**
@@ -20,53 +30,323 @@ Projeto desenvolvido durante o estágio de Engenharia de Dados com objetivo de v
 
 # 🎯 Objetivo
 
-Realizar o fluxo completo da tabela `ecommerce_pedidos`:
-
-- Conexão com Azure Data Lake Storage Gen2;
-- Leitura dos dados;
-- Análise exploratória;
-- Validação da qualidade dos dados;
-- Geração de indicadores;
-- Persistência no SQL Server.
-
----
-
-# 🗂️ Dados analisados
-
-**Tabela:**
+Realizar a análise exploratória da tabela:
 
 ```
 ecommerce_pedidos
 ```
 
-**Origem:**
+validando a qualidade dos dados e criando uma visão consolidada entre:
+
+- dados históricos (Batch);
+- novos eventos recebidos em tempo real (Real Time).
+
+---
+
+# 🏗️ Arquitetura do Fluxo de Dados
 
 ```
 Azure Data Lake Storage Gen2
+
+          |
+          |
+   ----------------
+   |              |
+ Batch         Real Time
+
+ CSV            Parquet
+
+   |              |
+   ----------------
+
+          |
+
+      Databricks
+
+          |
+
+  Análise Exploratória
+
+          |
+
+    SQL Server Azure
+
+          |
+
+ squad2.ecommerce_pedidos
 ```
 
-**Container:**
+---
 
-```
-raw
-```
+# 📂 Fontes de Dados
 
-**Arquivo:**
+## 📦 Histórico Batch
+
+Arquivo utilizado:
 
 ```
 batch-data/ecommerce_pedidos.csv
 ```
 
----
+Características:
 
-# 🏗️ Fluxo do Projeto
+- formato: CSV;
+- dados acumulados;
+- utilizado para análises históricas.
+
+Quantidade analisada:
 
 ```
-Azure Data Lake Gen2
+90.335 registros
+```
 
-        ↓
+---
 
-ecommerce_pedidos.csv
+## ⚡ Eventos Real Time
+
+Arquivo utilizado:
+
+```
+real-time-data/*/ecommerce_pedidos.parquet
+```
+
+Características:
+
+- formato: Parquet;
+- representa novas cargas recebidas;
+- utilizado para validação dos eventos recentes.
+
+Quantidade analisada:
+
+```
+6 registros
+```
+
+---
+
+# 🔎 Análises Realizadas
+
+## Estrutura dos Dados
+
+Foram avaliados:
+
+- quantidade de registros;
+- quantidade de colunas;
+- tipos dos dados;
+- estrutura das informações.
+
+---
+
+# 🧪 Qualidade dos Dados
+
+Foram realizadas validações:
+
+## Valores Nulos
+
+Resultado:
+
+✅ Nenhum valor nulo identificado.
+
+---
+
+## Registros Duplicados
+
+Resultado:
+
+✅ Nenhum registro duplicado encontrado.
+
+---
+
+## Integridade da Chave Primária
+
+Campo analisado:
+
+```
+id_pedido
+```
+
+Resultado:
+
+- 90.335 registros analisados;
+- 90.335 pedidos únicos;
+- nenhuma duplicidade encontrada.
+
+---
+
+# 📊 Análises de Negócio
+
+## Evolução dos Pedidos
+
+Análise do volume de pedidos ao longo do tempo.
+
+Objetivo:
+
+- identificar crescimento;
+- analisar sazonalidade;
+- observar variações mensais.
+
+---
+
+## Faturamento Mensal
+
+Análise da receita gerada pelos pedidos.
+
+Indicador:
+
+```
+SUM(valor_total)
+```
+
+---
+
+## Ticket Médio
+
+Cálculo:
+
+```
+Faturamento Total / Quantidade de Pedidos
+```
+
+Objetivo:
+
+Avaliar o comportamento médio de consumo dos clientes.
+
+---
+
+## Status dos Pedidos
+
+Análise operacional:
+
+- Entregue;
+- Enviado;
+- Em Separação;
+- Cancelado;
+- Pagamento Aprovado;
+- Processando.
+
+---
+
+## Métodos de Pagamento
+
+Foram analisados:
+
+- quantidade de pedidos por método;
+- faturamento por método.
+
+Métodos encontrados:
+
+- Cartão de Crédito;
+- Pix;
+- Boleto.
+
+---
+
+# ⚡ Análise dos Eventos Real Time
+
+A janela de dados recebida foi analisada considerando:
+
+- quantidade de novos pedidos;
+- valor movimentado;
+- status dos pedidos;
+- métodos de pagamento.
+
+Resultado da janela analisada:
+
+```
+6 novos pedidos
+
+R$ 754,66 movimentados
+```
+
+---
+
+# 🔄 Consolidação Batch + Real Time
+
+Após análise, os dados foram consolidados:
+
+```
+Histórico Batch
+
+90.335 registros
+
++
+
+Eventos Real Time
+
+6 registros
+
+=
+
+Tabela Consolidada
+
+90.341 registros
+```
+
+Validação realizada:
+
+```
+Pedidos únicos: 90.341
+
+Duplicidades: 0
+```
+
+---
+
+# 🗄️ Persistência SQL Server
+
+Após a validação, os dados consolidados foram enviados para:
+
+```sql
+squad2.ecommerce_pedidos
+```
+
+A tabela contém:
+
+- histórico completo;
+- novos eventos recebidos;
+- registros validados sem duplicidade.
+
+---
+
+# 🛠️ Tecnologias Utilizadas
+
+- Python
+- Pandas
+- PySpark
+- Databricks
+- Azure Data Lake Storage Gen2
+- SQL Server Azure
+- DBeaver
+- Git/GitHub
+
+---
+
+# 🔐 Segurança
+
+As credenciais de acesso são carregadas utilizando variáveis de ambiente através do arquivo:
+
+```
+.env
+```
+
+O arquivo `.env` não deve ser versionado no GitHub.
+
+Configuração obrigatória no `.gitignore`:
+
+```
+.env
+.env.*
+*.env
+```
+
+---
+
+# ✅ Resultado Final
+
+O projeto validou o fluxo completo:
+
+```
+Azure Data Lake
 
         ↓
 
@@ -78,6 +358,10 @@ Análise Exploratória
 
         ↓
 
+Consolidação Batch + Real Time
+
+        ↓
+
 SQL Server
 
         ↓
@@ -85,118 +369,4 @@ SQL Server
 squad2.ecommerce_pedidos
 ```
 
----
-
-# 🛠️ Tecnologias
-
-- Python
-- Pandas
-- Databricks
-- Azure Data Lake Storage Gen2
-- SQL Server Azure
-- Git/GitHub
-
----
-
-# 📁 Estrutura
-
-```
-RealTimeBusiness_Squad2_Dupla3
-
-├── notebooks
-│   ├── 01_conexao_adls_gen2.ipynb
-│   └── 02_eda_pedidos.ipynb
-│
-├── src
-│   └── salvar_pedidos_sql.py
-│
-├── README.md
-└── .gitignore
-```
-
----
-
-# 🔎 Análise Exploratória
-
-Foram realizadas análises de:
-
-- estrutura dos dados;
-- valores nulos;
-- registros duplicados;
-- evolução mensal dos pedidos;
-- faturamento;
-- ticket médio;
-- status dos pedidos;
-- métodos de pagamento;
-- taxa de cancelamento.
-
----
-
-# 📊 Principais Resultados
-
-- **Registros analisados:** 90.335
-- **Colunas:** 10
-- **Valores nulos:** nenhum encontrado
-- **Duplicados:** nenhum encontrado
-- **Ticket médio:** R$ 842,06
-- **Taxa de cancelamento:** 5,04%
-
----
-
-# 🗄️ SQL Server
-
-Após a análise, os dados foram carregados na tabela:
-
-```sql
-squad2.ecommerce_pedidos
-```
-
-Validação:
-
-```sql
-SELECT COUNT(*)
-FROM squad2.ecommerce_pedidos;
-```
-
-Resultado:
-
-```
-90.335 registros
-```
-
----
-
-# 🔐 Segurança
-
-As credenciais são armazenadas no arquivo `.env` e não são versionadas no GitHub.
-
-Variáveis utilizadas:
-
-```
-ADLS_CLIENT_ID
-ADLS_TENANT_ID
-ADLS_CLIENT_SECRET
-STORAGE_ACCOUNT_NAME
-CONTAINER_NAME
-SQL_HOST
-SQL_DATABASE
-SQL_USERNAME
-SQL_PASSWORD
-```
-
----
-
-# ✅ Conclusão
-
-O projeto validou o fluxo completo de dados:
-
-Azure Data Lake → Databricks → Análise Exploratória → SQL Server
-
-A entrega demonstra a integração entre armazenamento, processamento e análise de dados da tabela `ecommerce_pedidos`.
-
----
-
-**Squad 2 - Real Time for Business**  
-**Dupla 3**  
-Eduardo Geraldo de Souza  
-Aliedson Soares Silva
+A tabela final está preparada para consumo analítico e geração de indicadores de negócio.
