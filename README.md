@@ -1,6 +1,5 @@
-================================================================================
+
 PIPELINE DE DADOS: INGESTÃO REAL-TIME, QUALIDADE E CARGA RELACIONAL
-================================================================================
 
 Este projeto implementa um pipeline completo de Engenharia de Dados (End-to-End)
 desenvolvido para o estágio EmpregaDados. A solução automatiza a captura contínua
@@ -28,12 +27,12 @@ em 3 notebooks sequenciais:
 
 Crie um arquivo .env na raiz do projeto com as credenciais necessárias:
 
-# Credenciais do Azure AD / Service Principal para o ADLS Gen2
+Credenciais do Azure AD / Service Principal para o ADLS Gen2
 ADLS_CLIENT_ID="seu-client-id"
 ADLS_TENANT_ID="seu-tenant-id"
 ADLS_CLIENT_SECRET="seu-client-secret"
 
-# Credenciais de Acesso ao Azure SQL Server
+Credenciais de Acesso ao Azure SQL Server
 SQL_HOST="seu-servidor.database.windows.net"
 SQL_DATABASE="seu-banco-de-dados"
 SQL_USERNAME="seu-usuario"
