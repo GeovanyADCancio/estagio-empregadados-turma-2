@@ -15,12 +15,13 @@ Azure SQL Database via JDBC.
 O pipeline adota o princípio de Separação de Responsabilidades (SoC), organizado
 em 3 notebooks sequenciais:
 
+```text
 ├── 01_ingestao_adls_para_delta.ipynb       # Ingestão contínua, checkpoint e Delta Raw
-├── 02_qualidade_e_analise_exploratoria.sql  # Data Profiling, integridade e consistência
+├── 02_qualidade_e_analise_exploratoria.sql # Data Profiling, integridade e consistência
 ├── 03_carga_sqlserver_jdbc.ipynb           # Exportação relacional via JDBC e validação
 ├── .env                                    # Variáveis de ambiente (ignorado no Git)
 └── README.md                               # Documentação do projeto
-
+```
 --------------------------------------------------------------------------------
 2. CONFIGURAÇÃO DO AMBIENTE E VARIÁVEIS DE AMBIENTE (.env)
 --------------------------------------------------------------------------------
