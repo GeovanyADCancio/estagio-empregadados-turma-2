@@ -84,37 +84,38 @@ Documentação técnica oficial e artefatos de entrega da **Squad 2 — Dupla 1*
 
 ### 🚀 3. Ordem Oficial de Execução dos Notebooks
 
-Para garantir a integridade do pipeline e evitar erros de dependência, execute os notebooks na ordem sequencial:
-
+#### 📦 Sprint 1 (Histórico e Carga Inicial no SQL Server):
 ```text
 00_setup_config.ipynb ──> 01_extracao_produtos_categorias.ipynb ──> 02_carga_sqlserver.ipynb ──> 03_auditoria_data_quality.ipynb
 ```
+* **Passo 1:** `00_setup_config.ipynb` — Configuração dinâmica de `.env` e dependências.
+* **Passo 2:** `01_extracao_produtos_categorias.ipynb` — Extração distribuída do ADLS Gen2 (`raw/real-time-data/`).
+* **Passo 3:** `02_carga_sqlserver.ipynb` — Carga no Azure SQL Server (`format("sqlserver")`).
+* **Passo 4:** `03_auditoria_data_quality.ipynb` — Auditoria pós-carga via Catalyst (0 nulos, 0 órfãos).
 
-#### Passo 1: `00_setup_config.ipynb` (Task 1)
-* Carrega variáveis de ambiente de forma segura (`python-dotenv` com busca dinâmica).
-* Valida a presença das credenciais do ADLS Gen2 e do Azure SQL Server.
-* Instala as dependências (`azure-storage-file-datalake`, `azure-identity`, `pandas`, `pyarrow`, `pyodbc`).
+#### 🏅 Sprint 2 (Arquitetura Medalhão Delta Lake - Bronze & Silver):
+```text
+04_bronze_ingestao_delta.ipynb ──> 05_silver_limpeza_tratamento.ipynb
+```
 
-#### Passo 2: `01_extracao_produtos_categorias.ipynb` (Task 2)
-* Varre recursivamente todas as partições temporais de tempo real (`real-time-data/YYYY/MM/DD/HHMMSS/*.parquet`).
-* Executa a leitura distribuída no cluster Spark via `spark.read.options(**adls_options).parquet(...)`.
-* Realiza a deduplicação nativa em PySpark (`dropDuplicates(["sku"])` e `dropDuplicates(["id_categoria"])`).
-* Exibe schemas (`printSchema`) e contagens consolidadas.
+* **Passo 5:** `04_bronze_ingestao_delta.ipynb` (Task 1 — Ingestão Bronze com Metadados)
+  * Leitura incremental do bucket `raw` via **Auto Loader (`cloudFiles`)** sob demanda (`.trigger(availableNow=True)`).
+  * Adição obrigatória dos metadados de auditoria: `bronze_ingested_at` e `bronze_source_file`.
+  * **Zero transformação:** preservação integral do dado bruto.
+  * Particionamento físico temporal por `ano`, `mes`, `dia`, `hora`.
+  * Gravação em Delta em modo `append` no namespace isolado `squad2/grupo1/bronze/`.
+  * Registro e auditoria de cada lote na tabela de controle Delta `squad2.ingestion_control_log`.
 
-#### Passo 3: `02_carga_sqlserver.ipynb` (Task 4)
-* Extrai os dados consolidados de tempo real diretamente pelo cluster Spark.
-* Realiza a carga nas tabelas definitivas do banco no Azure SQL Server:
-  * `squad2.ecommerce_produtos`
-  * `squad2.ecommerce_categorias`
-* Gravação realizada em modo `overwrite` via conector nativo `format("sqlserver")`.
-* Validação imediata de contagem de registros gravados.
-
-#### Passo 4: `03_auditoria_data_quality.ipynb` (Task 3)
-* Lê as tabelas diretamente do SQL Server para atestar a qualidade da ingestão:
-  * **Estrutura:** Validação de schemas e tipos de colunas.
-  * **Chaves Primárias:** Auditoria de integridade comprovando **0 registros nulos** em `sku` e `id_categoria`.
-  * **Duplicidades:** Auditoria confirmando unicidade das PKs.
-  * **Integridade Referencial:** Validação de produtos órfãos via Left Anti Join (`id_categoria`).
+* **Passo 6:** `05_silver_limpeza_tratamento.ipynb` (Task 2 — Ingestão Silver, Limpeza e Quarentena)
+  * Consumo incremental da Bronze via Delta Streaming (`trigger(availableNow=True)`).
+  * Injeção do metadado de auditoria: `silver_processed_at`.
+  * Limpeza de strings (`trim`) e casting estrito de tipos (`preco_lista`, `is_ativo`).
+  * **Validação de Regras Técnicas com Quarentena:**
+    * *Produtos:* SKU entre 5 e 60 caracteres, preço entre 0 e 5000, `is_ativo` não nulo.
+    * *Categorias:* `id_categoria` e `nome_categoria` obrigatórios.
+    * Registros inválidos são segregados em `squad2/grupo1/quarantine/` com `quarantine_reason` e `quarantined_at`.
+  * **Alertas de Negócio em Tempo Real:** Alerta para lotes com $> 50$ novos SKUs, alerta crítico para produtos ativos com preço $\le 0$, e monitoramento de categorias raiz.
+  * Gravação dos registros válidos em Delta Silver em modo `append` no namespace `squad2/grupo1/silver/`.
 
 ---
 
