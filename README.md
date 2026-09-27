@@ -13,12 +13,14 @@ Azure SQL Database via JDBC.
 --------------------------------------------------------------------------------
 
 O pipeline adota o princípio de Separação de Responsabilidades (SoC), organizado
-em 3 notebooks sequenciais:
+em 5 notebooks sequenciais:
 
 ```text
 ├── 01_ingestao_adls_para_delta.ipynb       # Ingestão contínua, checkpoint e Delta Raw
 ├── 02_qualidade_e_analise_exploratoria.sql # Data Profiling, integridade e consistência
 ├── 03_carga_sqlserver_jdbc.ipynb           # Exportação relacional via JDBC e validação
+├── 04_ingestao_bronze.ipynb                # Micro-lote ADLS -> Delta Bronze (auditoria, particionada)
+├── 05_ingestao_silver.ipynb                # Regras de Data Quality -> Delta Silver
 ├── .env                                    # Variáveis de ambiente (ignorado no Git)
 └── README.md                               # Documentação do projeto
 ```
@@ -125,6 +127,43 @@ Responsável por enviar os dados consolidados para o banco relacional de serviç
   - spark.read.format("jdbc")...load(): Leitura direta da tabela no Azure SQL.
   - df_validacao.count(): Validação da integridade de contagem entre origem e destino.
 
+
+[NOTEBOOK 04: 04_ingestao_bronze]
+Ingestão por micro-lote (1 arquivo .parquet) para a camada Bronze, sem transformação.
+
+* Leitura:
+  - Credenciais via .env; autenticação pelo SDK (ClientSecretCredential), pois o compute
+    não permite configurar fs.azure.* via spark.conf.
+  - ler_parquet_como_spark(): Baixa o .parquet em memória, converte para DataFrame Spark
+    sem alterar os dados (colunas 100% nulas são mantidas como string nula).
+* Auditoria (única alteração nos dados):
+  - bronze_ingested_at = current_timestamp(): Momento da leitura.
+  - bronze_source_file: Caminho do arquivo de origem.
+* Escrita:
+  - Delta, mode("append"), tabela bronze_ecommerce_enderecos.
+  - partitionBy("ano", "mes", "dia", "hora"): Derivadas de bronze_ingested_at.
+* Checkpoint: bronze_source_file distintos já gravados na Bronze (idempotência).
+
+
+[NOTEBOOK 05: 05_ingestao_silver]
+Aplica as 10 regras de Data Quality (ecommerce_enderecos, Squad 1) por micro-lote.
+
+* Entrada: bronze_ecommerce_enderecos, filtrada por bronze_source_file ainda não
+  presente na Silver.
+* Saída: silver_ecommerce_enderecos (Delta, append) com uma coluna booleana por regra
+  (True = a linha FALHOU) e a coluna silver_processed_at.
+* Regras (colunas falha_rNN_*):
+  1. id_endereco não nulo nem duplicado (no lote e na Silver)
+  2. id_cliente existe em ecommerce_clientes (FK; tabela de referência configurável)
+  3. cep com exatamente 8 dígitos numéricos
+  4. estado é UF válida (26 estados + DF)
+  5. latitude/longitude não nulas e dentro do Brasil
+  6. exatamente 1 endereço is_principal = TRUE por cliente
+  7. apelido em 'Casa', 'Trabalho', 'Outro'
+  8. no máximo 3 endereços por cliente
+  9. logradouro não nulo nem vazio
+  10. numero não nulo
+
 --------------------------------------------------------------------------------
 4. COMO EXECUTAR
 --------------------------------------------------------------------------------
@@ -136,4 +175,9 @@ Responsável por enviar os dados consolidados para o banco relacional de serviç
    conformidade dos dados.
 4. Execute o notebook 03_carga_sqlserver_jdbc para carregar e validar a tabela
    no Azure SQL Server.
+5. Execute o notebook 04_ingestao_bronze para ingerir os micro-lotes na camada
+   Bronze (Delta particionada por data de ingestão).
+6. Execute o notebook 05_ingestao_silver para aplicar as 10 regras de qualidade
+   sobre os micro-lotes da Bronze e popular a camada Silver.
+   (Os notebooks 04 e 05 rodam em loop de polling; interrompa manualmente.)
 ================================================================================
