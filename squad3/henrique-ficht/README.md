@@ -7,10 +7,75 @@ referentes às tabelas sob responsabilidade do Squad 3 (Batch).
 
 ## Tabelas sob responsabilidade
 
-| Tabela | Fonte | Destino SQL Server |
+| Tabela | Fonte (Raw) | Bronze | Silver |
+|---|---|---|---|
+| `food_fornecedores` | `raw/batch-data/` | `squad3/bronze/food_fornecedores` | `squad3/silver/food_fornecedores` |
+| `food_lotes_producao` | `raw/batch-data/` | `squad3/bronze/food_lotes_producao` | `squad3/silver/food_lotes_producao` |
+
+---
+
+## Arquitetura Medalhão
+
+```
+Raw (CSV)  →  Bronze (Delta)  →  Silver (Delta)  →  Gold (futuro)
+                 append             merge (upsert)
+                 semanal            semanal
+```
+
+### Camada Bronze — Ingestão crua com auditoria
+
+Lê os CSVs históricos do container `raw` e salva em Delta no container `squad3/bronze/`,
+adicionando colunas de auditoria e particionamento.
+
+- **Modo:** `append` (acumulativo — cada execução adiciona um snapshot)
+- **Auditoria:** `bronze_ingested_at` (timestamp da ingestão), `bronze_source_file` (path do CSV)
+- **Partição:** `ano`, `mes` (extraídos de `dt_cadastro` / `dt_fabricacao`)
+- **Frequência:** semanal (toda segunda-feira)
+
+### Camada Silver — Limpeza, tratamento e validação
+
+Lê os Deltas da Bronze, aplica regras técnicas da planilha de regras (linhas 117–136),
+e salva em Delta no container `squad3/silver/`.
+
+- **Modo:** `merge` (upsert por PK — implementado via DataFrame por restrição do Unity Catalog)
+- **Auditoria:** `silver_processed_at`
+- **Partição:** `ano`, `mes`
+
+**Tratamentos aplicados:**
+
+- Deduplicação por PK (mantém registro mais recente por `bronze_ingested_at`)
+- Cast explícito de tipos (INT, BOOLEAN, TIMESTAMP, STRING)
+- Trim em todas as colunas string
+- CNPJ: remoção de pontuação + `lpad` seguro (somente 13→14 dígitos)
+- Certificações: trim individual de cada item separado por `;`
+- UF: `upper()` + `trim()`
+- Remoção das colunas de auditoria da Bronze
+
+**Regras técnicas — food_fornecedores:**
+
+| Regra | Validação | Ação |
 |---|---|---|
-| `food_fornecedores` | `abfss://raw@internshipdatalake.dfs.core.windows.net/batch-data/` | `squad3.food_fornecedores` |
-| `food_lotes_producao` | `abfss://raw@internshipdatalake.dfs.core.windows.net/batch-data/` | `squad3.food_lotes_producao` |
+| `id_fornecedor` PK | Não nulo, não duplicado | Remove |
+| `cnpj` 14 dígitos | Flag antes do tratamento, lpad só para 13 dígitos | Flag `_flag_cnpj_invalido` |
+| `categoria_fornecida` | Validada contra `ecommerce_categorias` e `physical_produtos_pereciveis` (dinâmico) | Flag `_flag_categoria_invalida` |
+| `tipo_fornecedor` | Lista permitida (7 tipos) | Flag `_flag_tipo_invalido` |
+| `lead_time_dias` > 0 | Range por tipo (1-3 Produção Própria; 2-20 demais) | Flag `_flag_lead_time_invalido` |
+| `uf_origem` | 27 UFs do Brasil | Flag `_flag_uf_invalida` |
+| `razao_social` | Não nula/vazia | Flag `_flag_razao_social_vazia` |
+
+**Regras técnicas — food_lotes_producao:**
+
+| Regra | Validação | Ação |
+|---|---|---|
+| `id_lote` PK | Não nulo, não duplicado | Remove |
+| `sku` FK | Deve existir no catálogo unificado (ecommerce + perecíveis) | Flag `_flag_sku_sem_catalogo` |
+| `id_fornecedor` FK | Deve existir na Silver de fornecedores | Flag `_flag_fornecedor_orfao` |
+| `status` | Enum: Ativo, Vencido, Recall | Flag `_flag_status_invalido` |
+| `dt_validade` > `dt_fabricacao` | Validade invertida = chaos proposital | Flag `_flag_validade_invertida` |
+| `temperatura_armazenamento_ideal` | Enum: Refrigerado, Ambiente, Congelado | Flag `_flag_temperatura_invalida` |
+| `quantidade_produzida` > 0 | Quantidade zero ou negativa | Flag `_flag_quantidade_invalida` |
+
+> Dados inválidos são **flagados, nunca descartados**. A decisão de uso fica para a camada Gold.
 
 ---
 
@@ -21,18 +86,33 @@ referentes às tabelas sob responsabilidade do Squad 3 (Batch).
 02_eda_fornecedores.py   → Análise exploratória de food_fornecedores
 03_eda_lotes_producao.py → Análise exploratória de food_lotes_producao
 04_ingestao_sql.py       → Validação de permissões e ingestão no SQL Server
+05_ingestao_bronze.py    → Ingestão Bronze: raw (CSV) → Delta com auditoria e partição
+06_ingestao_silver.py    → Ingestão Silver: limpeza, tratamento, flags e merge por PK
+```
+
+### Fluxo semanal (toda segunda-feira)
+
+```
+05_ingestao_bronze  →  06_ingestao_silver
+     (append)              (merge)
 ```
 
 ---
 
 ## Stack
 
-- **Plataforma:** Databricks Free Edition (Serverless)
+- **Plataforma:** Databricks Serverless (Unity Catalog habilitado)
 - **Data Lake:** Azure Data Lake Gen2 — storage account `internshipdatalake`
-- **Container:** `raw` / pasta `batch-data/`
+- **Containers:** `raw` (CSVs originais) · `squad3` (Bronze e Silver em Delta)
 - **Autenticação ADLS:** Service Principal (OAuth 2.0)
+- **Formato de armazenamento:** Delta Lake (particionado por ano/mês)
 - **Banco de dados:** Azure SQL Server — schema `squad3`
 - **Conector SQL:** `format("sqlserver")` nativo do Databricks Serverless
+
+### Restrições do ambiente
+
+- `input_file_name()` bloqueado pelo Unity Catalog → usar `_metadata.file_path`
+- `spark.conf.set()` bloqueado para configs Hadoop → `DeltaTable.merge()` indisponível, merge implementado via DataFrame (union + dedup + overwrite)
 
 ---
 
@@ -55,13 +135,13 @@ referentes às tabelas sob responsabilidade do Squad 3 (Batch).
    SQL_USERNAME=
    SQL_PASSWORD=
    ```
+3. Service Principal com role `Storage Blob Data Contributor` nos containers `raw` e `squad3`
 
 ### Ordem de execução
 
-Execute os notebooks na ordem numérica:
-
 ```
-01 → 02 → 03 → 04
+01 → 02 → 03 → 04          (setup + EDA + SQL — executar uma vez)
+05 → 06                     (Bronze + Silver — executar semanalmente)
 ```
 
 Cada notebook carrega as credenciais do `.env` de forma independente —
@@ -139,8 +219,8 @@ Rastreabilidade de lotes de produção vinculados aos SKUs e fornecedores.
 
 **Principais fornecedores por volume total produzido:**
 - Fornecedores 46 e 45 lideram com mais de 900k unidades e mais de 1.100 lotes cada.
-- Fornecedores 8, 9, 10 e 11 têm poucos lotes (~162-167) mas altíssima produção por lote
-  (~4.900 a 4.953 unidades) — perfil de produção industrial em escala.
+- Fornecedores 8, 9, 10 e 11 têm poucos lotes (aproximadamente 162-167) mas altíssima produção por lote
+  (aproximadamente  4.900 a 4.953 unidades) — perfil de produção industrial em escala.
 
 > ⚠️ **Dado crítico:** 80,97% dos lotes estão com status Vencido — número elevado que
 > indica necessidade de análise mais profunda (pode refletir histórico acumulado sem limpeza,
@@ -156,8 +236,9 @@ Rastreabilidade de lotes de produção vinculados aos SKUs e fornecedores.
 
 - Credenciais **nunca** hardcodadas nos notebooks
 - Arquivo `.env` fora do repositório Git e listado no `.gitignore`
-- Acesso restrito às tabelas do schema `squad3`
+- Acesso restrito ao container `squad3` e schema SQL `squad3`
 - Nenhuma estrutura compartilhada foi alterada
+- Tabelas de referência de outras squads são apenas **lidas** para validação de FK (nunca escritas)
 
 ---
 
