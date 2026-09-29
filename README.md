@@ -132,29 +132,37 @@ Responsável por enviar os dados consolidados para o banco relacional de serviç
 Ingestão por micro-lote (1 arquivo .parquet) para a camada Bronze, sem transformação.
 
 * Leitura:
-  - Credenciais via .env; autenticação pelo SDK (ClientSecretCredential), pois o compute
-    não permite configurar fs.azure.* via spark.conf.
-  - ler_parquet_como_spark(): Baixa o .parquet em memória, converte para DataFrame Spark
-    sem alterar os dados (colunas 100% nulas são mantidas como string nula).
+  - Credenciais via .env; autenticação Spark passando as credenciais como opções de
+    cada leitura/escrita (adls_opts), pois o compute serverless não permite
+    configurar fs.azure.* via spark.conf.
+  - Origem: raw/real-time-data/AAAA/MM/DD/HHMMSS/ecommerce_enderecos.parquet.
+  - ler_micro_lote(): Lê o .parquet direto com Spark, mantendo os tipos originais. Só
+    padroniza o tipo de colunas 100% nulas (o gerador às vezes as grava como int);
+    qualquer outra divergência de schema interrompe o micro-lote para revisão manual.
 * Auditoria (única alteração nos dados):
   - bronze_ingested_at = current_timestamp(): Momento da leitura.
   - bronze_source_file: Caminho do arquivo de origem.
 * Escrita:
-  - Delta, mode("append"), tabela bronze_ecommerce_enderecos.
+  - Delta, mode("append"), em abfss://squad1@<storage>/bronze/ecommerce_enderecos.
   - partitionBy("ano", "mes", "dia", "hora"): Derivadas de bronze_ingested_at.
-* Checkpoint: bronze_source_file distintos já gravados na Bronze (idempotência).
+* Checkpoint: bronze_source_file distintos já gravados na Bronze (idempotência). Se a
+  Bronze existir mas não puder ser lida, o notebook para (evita reingestão duplicada).
+* Tolerância a falhas: tratamento de erro por arquivo; um arquivo com problema não
+  impede os seguintes e é tentado de novo na próxima varredura.
 
 
 [NOTEBOOK 05: 05_ingestao_silver]
 Aplica as 10 regras de Data Quality (ecommerce_enderecos, Squad 1) por micro-lote.
 
-* Entrada: bronze_ecommerce_enderecos, filtrada por bronze_source_file ainda não
-  presente na Silver.
-* Saída: silver_ecommerce_enderecos (Delta, append) com uma coluna booleana por regra
-  (True = a linha FALHOU) e a coluna silver_processed_at.
+* Entrada: squad1/bronze/ecommerce_enderecos, filtrada por bronze_source_file ainda
+  não presente na Silver (processados em ordem cronológica).
+* Saída: abfss://squad1@<storage>/silver/ecommerce_enderecos (Delta, append) com uma
+  coluna booleana por regra (True = a linha FALHOU) e a coluna silver_processed_at.
 * Regras (colunas falha_rNN_*):
   1. id_endereco não nulo nem duplicado (no lote e na Silver)
-  2. id_cliente existe em ecommerce_clientes (FK; tabela de referência configurável)
+  2. id_cliente existe em squad1/bronze/ecommerce_clientes (FK; tabela da outra dupla,
+     somente leitura). Se ela não estiver disponível, o micro-lote não é gravado e é
+     tentado de novo na próxima varredura.
   3. cep com exatamente 8 dígitos numéricos
   4. estado é UF válida (26 estados + DF)
   5. latitude/longitude não nulas e dentro do Brasil
@@ -163,6 +171,8 @@ Aplica as 10 regras de Data Quality (ecommerce_enderecos, Squad 1) por micro-lot
   8. no máximo 3 endereços por cliente
   9. logradouro não nulo nem vazio
   10. numero não nulo
+  As regras 6 e 8 contam todos os endereços do cliente na Bronze até o micro-lote
+  atual (última versão de cada id_endereco), não apenas o arquivo em processamento.
 
 --------------------------------------------------------------------------------
 4. COMO EXECUTAR
@@ -176,7 +186,7 @@ Aplica as 10 regras de Data Quality (ecommerce_enderecos, Squad 1) por micro-lot
 4. Execute o notebook 03_carga_sqlserver_jdbc para carregar e validar a tabela
    no Azure SQL Server.
 5. Execute o notebook 04_ingestao_bronze para ingerir os micro-lotes na camada
-   Bronze (Delta particionada por data de ingestão).
+   Bronze (Delta particionada por data de ingestão, em squad1/bronze).
 6. Execute o notebook 05_ingestao_silver para aplicar as 10 regras de qualidade
    sobre os micro-lotes da Bronze e popular a camada Silver.
    (Os notebooks 04 e 05 rodam em loop de polling; interrompa manualmente.)
