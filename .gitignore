@@ -1,6 +1,8 @@
 # Ambiente virtual
 .venv/
 venv/
+DOC/
+doc/
 
 # Variáveis de ambiente e credenciais
 .env
