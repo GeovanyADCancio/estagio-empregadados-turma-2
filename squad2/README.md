@@ -1,7 +1,7 @@
-# 🚀 Pipeline de Engenharia de Dados: Camadas Bronze e Silver (Delta Lake)
+# 🚀 Pipeline de Engenharia de Dados: Sprint 1 (Relacional) e Sprint 2 (Delta Lake)
 ## Squad 2 — Real Time for Business | Dupla 5 (Grupo 5)
 
-Este diretório contém a esteira completa e resiliente de processamento distribuído no **Databricks** sobre o **Azure Data Lake Storage Gen2 (ADLS Gen2)** para as tabelas sob responsabilidade da **Dupla 5**:
+Este diretório contém a esteira completa e resiliente de processamento distribuído no **Databricks** sobre o **Azure Data Lake Storage Gen2 (ADLS Gen2)** e o **Azure SQL Server** para as tabelas sob responsabilidade da **Dupla 5**:
 * `ecommerce_rastreamento_entregas` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_rastreamento.parquet`)*
 * `ecommerce_enderecos` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_enderecos.parquet`)*
 
@@ -14,6 +14,12 @@ flowchart TD
     subgraph Raw ["1. Raw Data Lake (Landing Zone)"]
         R1["ecommerce_rastreamento.parquet"]
         R2["ecommerce_enderecos.parquet"]
+    end
+
+    subgraph Sprint1 ["Sprint 1: Carga Relacional & Data Quality (SQL Server)"]
+        SQL_LOAD["02_carga_sqlserver.ipynb\n(Carga resiliente com fallback pyodbc)"]
+        SQL_AUDIT["03_auditoria_data_quality.ipynb\n(Auditoria de PKs, nulos e domínio)"]
+        SQL_DB[("Azure SQL Server\nsquad2.ecommerce_*")]
     end
 
     subgraph Bronze ["2. Camada Bronze (Delta Lake - Append Only)"]
@@ -29,6 +35,11 @@ flowchart TD
         Q2["squad2/grupo5/quarantine/ecommerce_enderecos"]
     end
 
+    R1 -->|"Leitura distribuída Spark"| SQL_LOAD
+    R2 -->|"Leitura distribuída Spark"| SQL_LOAD
+    SQL_LOAD --> SQL_DB
+    SQL_DB --> SQL_AUDIT
+
     R1 -->|"Leitura distribuída + _metadata.file_path"| B_CTRL
     R2 -->|"Leitura distribuída + _metadata.file_path"| B_CTRL
     B_CTRL -->|"Anti-join de arquivos inéditos"| B1
@@ -42,14 +53,16 @@ flowchart TD
 
 ---
 
-### 📂 Estrutura de Notebooks
+### 📂 Estrutura Completa de Notebooks
 
-| Notebook | Propósito | Destaques Técnicos |
-| :--- | :--- | :--- |
-| **`00_setup_config.ipynb`** | Configuração do ambiente | Instalação de libs no escopo Serverless, carga dinâmica do `.env` e validação da conexão OAuth FQDN com o ADLS Gen2. |
-| **`01_extracao_rastreamento_enderecos.ipynb`** | Análise exploratória & EDA | Leitura paralela dos arquivos brutos no container `raw`, inferência de schema e validação das chaves primárias. |
-| **`04_bronze_ingestao_delta.ipynb`** | Ingestão incremental Bronze | Preservação integral do dado bruto (zero cast/filtro), idempotência via `ingestion_control_log`, adição de `bronze_ingested_at` / `bronze_source_file` e particionamento diário. |
-| **`05_silver_limpeza_tratamento.ipynb`** | Curadoria, Quarentena e Upsert | Consumo via Watermark temporal, `trim()`, validação de regras com isolamento em Quarentena (`quarantine_reason`), alertas de negócio e persistência atômica via `MERGE INTO` com fallback resiliente. |
+| Notebook | Fase / Sprint | Propósito | Destaques Técnicos |
+| :--- | :---: | :--- | :--- |
+| **`00_setup_config.ipynb`** | Setup | Configuração do ambiente | Instalação de bibliotecas Serverless, carga dinâmica do `.env` e validação da conexão OAuth FQDN com o ADLS Gen2. |
+| **`01_extracao_rastreamento_enderecos.ipynb`** | Sprint 1 | Análise exploratória & EDA | Leitura paralela dos arquivos brutos no container `raw`, inferência de schema e validação das chaves primárias. |
+| **`02_carga_sqlserver.ipynb`** | Sprint 1 | Carga relacional no SQL Server | Deduplicação por chave primária e persistência com estratégia tripla (conector nativo `sqlserver`, JDBC e bypass `pyodbc fast_executemany`). |
+| **`03_auditoria_data_quality.ipynb`** | Sprint 1 | Auditoria e Data Quality | Leitura direta do SQL Server, contagem de registros, auditoria de 0 nulos e 0 duplicatas nas PKs e perfilamento de colunas. |
+| **`04_bronze_ingestao_delta.ipynb`** | Sprint 2 | Ingestão incremental Bronze | Pureza absoluta do dado bruto (zero cast/filtro), idempotência via `ingestion_control_log`, metadados de auditoria e particionamento diário. |
+| **`05_silver_limpeza_tratamento.ipynb`** | Sprint 2 | Curadoria, Quarentena e Upsert | Consumo via Watermark temporal, `trim()`, validação de regras com isolamento em Quarentena (`quarantine_reason`), alertas de negócio e persistência atômica via `MERGE INTO` com fallback resiliente. |
 
 ---
 
@@ -79,7 +92,9 @@ flowchart TD
 ### 🛡️ Compatibilidade com Databricks Free / Serverless
 1. **Configuração FQDN de Storage**:
    `fs.azure.account.auth.type.<storage_account>.dfs.core.windows.net = "OAuth"` injetado em cada chamada Spark, contornando a restrição de `spark.conf.set()` global no Serverless.
-2. **Upsert Resiliente**:
+2. **Carga SQL Server Resiliente**:
+   Bypass automático com `pyodbc` caso as restrições de DML do Spark Connect bloqueiem a escrita JDBC direta.
+3. **Upsert Resiliente na Silver**:
    Tentativa nativa com `DeltaTable.merge()`, com chaveamento automático para transação atômica (`left_anti` broadcast + overwrite) caso ocorram restrições de permissão do metastore.
-3. **Prevenção ao Small Files Problem**:
+4. **Prevenção ao Small Files Problem**:
    Particionamento diário (`data_particao`) e ativação das flags `delta.autoOptimize.optimizeWrite` e `delta.autoOptimize.autoCompact`.
