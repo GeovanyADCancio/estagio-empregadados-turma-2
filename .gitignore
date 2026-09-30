@@ -1,3 +1,14 @@
 .env
 .env.*
 *.env
+
+# Local agent, documentacao e second brain
+.agent/
+.agent
+DOC/
+doc/
+DOC
+doc
+SECOND_BRAIN.md
+second_brain*
+SECOND_BRAIN*
