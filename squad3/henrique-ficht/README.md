@@ -17,9 +17,9 @@ referentes às tabelas sob responsabilidade do Squad 3 (Batch).
 ## Arquitetura Medalhão
 
 ```
-Raw (CSV)  →  Bronze (Delta)  →  Silver (Delta)  →  Gold (futuro)
-                 append             merge (upsert)
-                 semanal            semanal
+Raw (CSV)  →  Bronze (Delta)       →  Silver (Delta)         →  Gold (futuro)
+              append incremental       merge (upsert por PK)
+              semanal                  semanal
 ```
 
 ### Camada Bronze — Ingestão crua com auditoria
@@ -27,17 +27,18 @@ Raw (CSV)  →  Bronze (Delta)  →  Silver (Delta)  →  Gold (futuro)
 Lê os CSVs históricos do container `raw` e salva em Delta no container `squad3/bronze/`,
 adicionando colunas de auditoria e particionamento.
 
-- **Modo:** `append` (acumulativo — cada execução adiciona um snapshot)
-- **Auditoria:** `bronze_ingested_at` (timestamp da ingestão), `bronze_source_file` (path do CSV)
+- **Modo:** `append` incremental — verifica `modificationTime` do CSV e só appenda se o arquivo foi modificado desde a última ingestão (compara contra `MAX(bronze_ingested_at)` da Bronze)
+- **Auditoria:** `bronze_ingested_at` (timestamp da ingestão), `bronze_source_file` (path do CSV via `_metadata.file_path`)
 - **Partição:** `ano`, `mes` (extraídos de `dt_cadastro` / `dt_fabricacao`)
 - **Frequência:** semanal (toda segunda-feira)
+- **Idempotência:** rodar o notebook múltiplas vezes com o mesmo CSV não gera duplicatas na Bronze
 
 ### Camada Silver — Limpeza, tratamento e validação
 
 Lê os Deltas da Bronze, aplica regras técnicas da planilha de regras (linhas 117–136),
 e salva em Delta no container `squad3/silver/`.
 
-- **Modo:** `merge` (upsert por PK — implementado via DataFrame por restrição do Unity Catalog)
+- **Modo:** `merge` manual (upsert por PK — implementado via DataFrame por restrição do Unity Catalog)
 - **Auditoria:** `silver_processed_at`
 - **Partição:** `ano`, `mes`
 
@@ -57,7 +58,7 @@ e salva em Delta no container `squad3/silver/`.
 |---|---|---|
 | `id_fornecedor` PK | Não nulo, não duplicado | Remove |
 | `cnpj` 14 dígitos | Flag antes do tratamento, lpad só para 13 dígitos | Flag `_flag_cnpj_invalido` |
-| `categoria_fornecida` | Validada contra `ecommerce_categorias` e `physical_produtos_pereciveis` (dinâmico) | Flag `_flag_categoria_invalida` |
+| `categoria_fornecida` | Validada contra Silvers de referência (dinâmico) | Flag `_flag_categoria_invalida` |
 | `tipo_fornecedor` | Lista permitida (7 tipos) | Flag `_flag_tipo_invalido` |
 | `lead_time_dias` > 0 | Range por tipo (1-3 Produção Própria; 2-20 demais) | Flag `_flag_lead_time_invalido` |
 | `uf_origem` | 27 UFs do Brasil | Flag `_flag_uf_invalida` |
@@ -68,7 +69,7 @@ e salva em Delta no container `squad3/silver/`.
 | Regra | Validação | Ação |
 |---|---|---|
 | `id_lote` PK | Não nulo, não duplicado | Remove |
-| `sku` FK | Deve existir no catálogo unificado (ecommerce + perecíveis) | Flag `_flag_sku_sem_catalogo` |
+| `sku` FK | Deve existir no catálogo unificado (Silvers de ecommerce + perecíveis) | Flag `_flag_sku_sem_catalogo` |
 | `id_fornecedor` FK | Deve existir na Silver de fornecedores | Flag `_flag_fornecedor_orfao` |
 | `status` | Enum: Ativo, Vencido, Recall | Flag `_flag_status_invalido` |
 | `dt_validade` > `dt_fabricacao` | Validade invertida = chaos proposital | Flag `_flag_validade_invertida` |
@@ -76,6 +77,19 @@ e salva em Delta no container `squad3/silver/`.
 | `quantidade_produzida` > 0 | Quantidade zero ou negativa | Flag `_flag_quantidade_invalida` |
 
 > Dados inválidos são **flagados, nunca descartados**. A decisão de uso fica para a camada Gold.
+
+### Dependências entre squads (cascata de qualidade)
+
+A Silver da Squad 3 consome Silvers de outras squads para validação de FK — nunca lê do Raw.
+Isso segue o princípio de que cada camada confia na camada anterior.
+
+| Tabela de referência | Responsável | Usada em |
+|---|---|---|
+| `ecommerce_produtos` | Squad 1 | Validação de FK `sku` |
+| `physical_produtos_pereciveis` | Squad 3 (própria) | Validação de `categoria_fornecida` e FK `sku` |
+
+> ⚠️ Se qualquer uma dessas Silvers não existir, o notebook 06 falha explicitamente.
+> Isso torna a dependência visível e evita falsos positivos nas flags.
 
 ---
 
@@ -86,7 +100,7 @@ e salva em Delta no container `squad3/silver/`.
 02_eda_fornecedores.py   → Análise exploratória de food_fornecedores
 03_eda_lotes_producao.py → Análise exploratória de food_lotes_producao
 04_ingestao_sql.py       → Validação de permissões e ingestão no SQL Server
-05_ingestao_bronze.py    → Ingestão Bronze: raw (CSV) → Delta com auditoria e partição
+05_ingestao_bronze.py    → Ingestão Bronze: raw (CSV) → Delta com auditoria, partição e append incremental
 06_ingestao_silver.py    → Ingestão Silver: limpeza, tratamento, flags e merge por PK
 ```
 
@@ -103,7 +117,7 @@ e salva em Delta no container `squad3/silver/`.
 
 - **Plataforma:** Databricks Serverless (Unity Catalog habilitado)
 - **Data Lake:** Azure Data Lake Gen2 — storage account `internshipdatalake`
-- **Containers:** `raw` (CSVs originais) · `squad3` (Bronze e Silver em Delta)
+- **Containers:** `raw` (CSVs originais, somente leitura) · `squad3` (Bronze e Silver em Delta)
 - **Autenticação ADLS:** Service Principal (OAuth 2.0)
 - **Formato de armazenamento:** Delta Lake (particionado por ano/mês)
 - **Banco de dados:** Azure SQL Server — schema `squad3`
@@ -136,6 +150,7 @@ e salva em Delta no container `squad3/silver/`.
    SQL_PASSWORD=
    ```
 3. Service Principal com role `Storage Blob Data Contributor` nos containers `raw` e `squad3`
+4. Para rodar o notebook 06: Silvers das Squads 1 e 3 (tabelas de referência) devem estar disponíveis
 
 ### Ordem de execução
 
@@ -236,9 +251,10 @@ Rastreabilidade de lotes de produção vinculados aos SKUs e fornecedores.
 
 - Credenciais **nunca** hardcodadas nos notebooks
 - Arquivo `.env` fora do repositório Git e listado no `.gitignore`
+- Container `raw` é **somente leitura** — nenhuma escrita por parte da Squad 3
 - Acesso restrito ao container `squad3` e schema SQL `squad3`
 - Nenhuma estrutura compartilhada foi alterada
-- Tabelas de referência de outras squads são apenas **lidas** para validação de FK (nunca escritas)
+- Tabelas de referência de outras squads são apenas **lidas** da Silver delas para validação de FK (nunca escritas)
 
 ---
 
