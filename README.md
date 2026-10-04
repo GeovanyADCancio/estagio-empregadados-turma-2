@@ -3,19 +3,24 @@
 Pipeline de Data Quality para `ecommerce_produtos` e `ecommerce_categorias`, parte do estágio EmpregaDados.
 
 ## Fluxo
-ADLS Gen2 (parquet, snapshots em tempo real) → Databricks (Spark, autenticação OAuth via `.options()`) → SQL Server (Azure), com 20 regras de qualidade validadas.
+ADLS Gen2 (parquet, snapshots em tempo real) → Databricks (Spark, autenticação OAuth via `.options()`) → camadas Bronze e Silver em **Delta**, gravadas por caminho dentro do container `squad1` do ADLS (não tabela gerenciada por catálogo — cada conta Free Edition tem Unity Catalog isolado, então esse é o único formato que a squad inteira consegue enxergar).
 
 ## Notebooks
-- **`03_conexao_adls_rafael`** — conexão com o ADLS, leitura dos snapshots, EDA e gravação inicial das tabelas.
-- **`04_regras_dq_rafael`** — as 20 regras técnicas e de negócio (planilha oficial de 26/09), gravadas em formato vertical de métricas.
+- **`bronze_produtos_categorias`** — lê os micro-lotes do `raw`, sem transformação, adiciona `bronze_ingested_at` e `bronze_source_file`, grava em `squad1/bronze/` particionado por data, idempotente por arquivo.
+- **`silver_produtos_categorias`** — aplica as 20 regras oficiais (técnica + negócio) como coluna booleana por linha (`regra_01_...` a `regra_10_...`), grava em `squad1/silver/` em append.
 
 ## Como rodar
-Requer um `.env` na mesma pasta (não versionado) com as credenciais do ADLS e do SQL Server. Rodar célula por célula, na ordem.
+Requer um `.env` na mesma pasta (não versionado) com as credenciais do ADLS. Rodar célula por célula, na ordem: Bronze primeiro, Silver depois.
 
 ## Achados principais
-- **Autenticação:** `spark.conf.set()` e RDD (`sparkContext.parallelize`) não funcionam no Serverless. Solução: `spark.read.format("parquet").options(**adls_options).load(...)`, credenciais passadas por chamada.
-- **Qualidade dos dados:** 1,4% dos produtos com `preco_lista <= 0` (proposital, confirmado pelo Geovany); 18,5% das categorias com caractere inválido no nome; 17% das subcategorias sem produto associado.
-- **Duas regras bloqueadas** por dependência externa (venda nos últimos 90 dias; contagem de referência de categorias raiz), registradas sem inventar valor.
+- **Autenticação:** `spark.conf.set()` global e RDD (`sparkContext.parallelize`) não funcionam no Serverless. Solução: credenciais passadas por chamada via `.options(**adls_options)`.
+- **Unity Catalog é isolado por conta** no Free Edition — tabela "compartilhada" só existe como Delta por caminho no ADLS, não como tabela de catálogo.
+- **Qualidade dos dados:** `preco_lista <= 0` em 1,4% dos produtos (proposital, confirmado pelo Geovany); subcategorias sem produto associado em observação.
+- **Regra de caractere inválido em `nome_categoria`:** o `&` foi liberado pelo Geovany — categorias como "Adega & Destilados" são nomes legítimos, não dado sujo.
+- **Duas regras com dependência externa, sem inventar valor:** venda nos últimos 90 dias (dados de outra dupla — liberado usar a Bronze deles provisoriamente, trocar por Silver quando publicarem) e contagem de categorias raiz contra `config.py` (valor de referência ainda não informado).
 
 ## Pendente
-Confirmar se a camada Silver final vive em formato Delta (Unity Catalog) ou SQL Server — ver documentação completa no Notion da squad.
+- Confirmar destino de `squad1/dq_monitoring_logs` (tabela de log compartilhada pela squad — caminho exato ainda não definido).
+- Consolidar nomenclatura de coluna de regra entre as duplas da squad, hoje não padronizada.
+
+Documentação completa no Notion da squad.
