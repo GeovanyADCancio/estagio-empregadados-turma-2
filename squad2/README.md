@@ -5,6 +5,9 @@ Este diretório contém a esteira completa e resiliente de processamento distrib
 * `ecommerce_rastreamento_entregas` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_rastreamento.parquet`)*
 * `ecommerce_enderecos` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_enderecos.parquet`)*
 
+> 📖 **Catálogo Semântico e Contratos de Dados (OKF):**  
+> Para consultar os contratos Delta Lake, schemas curados, caminhos FQDN no ADLS e KPIs analíticos em padrão **Open Knowledge Format**, consulte a pasta [`../knowledge/`](../knowledge/index.md).
+
 ---
 
 ### 🏛️ Arquitetura da Solução
