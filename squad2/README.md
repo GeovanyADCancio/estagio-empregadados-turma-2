@@ -38,6 +38,13 @@ flowchart TD
         Q2["squad2/grupo5/quarantine/ecommerce_enderecos"]
     end
 
+    subgraph Gold ["4. Camada Gold (Data Marts Analíticos & Destino Duplo)"]
+        G1["squad2/grupo5/gold/gold_logistica_pedidos_rota"]
+        G2["squad2/grupo5/gold/gold_performance_transportadoras"]
+        G3["squad2/grupo5/gold/gold_distribuicao_geografica_clientes"]
+        SQL_GOLD[("Azure SQL Server (DW)\nsquad2.gold_*")]
+    end
+
     R1 -->|"Leitura distribuída Spark"| SQL_LOAD
     R2 -->|"Leitura distribuída Spark"| SQL_LOAD
     SQL_LOAD --> SQL_DB
@@ -52,6 +59,12 @@ flowchart TD
     B1 -.->|"Falha Técnica (Quarentena)"| Q1
     B2 -->|"Leitura Incremental (Watermark)"| S2
     B2 -.->|"Falha Técnica (Quarentena)"| Q2
+
+    S1 -->|"Agregações de Rota & SLA"| G1
+    S1 -->|"Scorecard & Rankings"| G2
+    S2 -->|"Inteligência Geográfica"| G3
+
+    G1 & G2 & G3 -->|"Replicação Analítica"| SQL_GOLD
 ```
 
 ---
@@ -66,6 +79,7 @@ flowchart TD
 | **`03_auditoria_data_quality.ipynb`** | Sprint 1 | Auditoria e Data Quality | Leitura direta do SQL Server, contagem de registros, auditoria de 0 nulos e 0 duplicatas nas PKs e perfilamento de colunas. |
 | **`04_bronze_ingestao_delta.ipynb`** | Sprint 2 | Ingestão incremental Bronze | Pureza absoluta do dado bruto (zero cast/filtro), idempotência via `ingestion_control_log`, metadados de auditoria e particionamento diário. |
 | **`05_silver_limpeza_tratamento.ipynb`** | Sprint 2 | Curadoria, Quarentena e Upsert | Consumo via Watermark temporal, `trim()`, validação de regras com isolamento em Quarentena (`quarantine_reason`), alertas de negócio e persistência atômica via `MERGE INTO` com fallback resiliente. |
+| **`06_gold_metricas_analiticas.ipynb`** | Sprint 3 | Data Marts, KPIs e Destino Duplo | Consumo exclusivo Silver-to-Gold, agregações analíticas (funil de rota, ranking de transportadoras e densidade por UF) com persistência em Delta Lake e replicação relacional no Azure SQL Server. |
 
 ---
 
