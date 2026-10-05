@@ -1,117 +1,130 @@
-# 🚀 Pipeline de Engenharia de Dados: Sprint 1 (Relacional) e Sprint 2 (Delta Lake)
-## Squad 2 — Real Time for Business | Dupla 5 (Grupo 5)
+# 🚀 Squad 2 — Real Time for Business (Esteira Unificada)
+## Dupla 1 & Dupla 5 (Grupo 1 & Grupo 5 Integrados)
 
-Este diretório contém a esteira completa e resiliente de processamento distribuído no **Databricks** sobre o **Azure Data Lake Storage Gen2 (ADLS Gen2)** e o **Azure SQL Server** para as tabelas sob responsabilidade da **Dupla 5**:
-* `ecommerce_rastreamento_entregas` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_rastreamento.parquet`)*
-* `ecommerce_enderecos` *(fonte: `raw/real-time-data/*/*/*/*/ecommerce_enderecos.parquet`)*
-
-> 📖 **Catálogo Semântico e Contratos de Dados (OKF):**  
-> Para consultar os contratos Delta Lake, schemas curados, caminhos FQDN no ADLS e KPIs analíticos em padrão **Open Knowledge Format**, consulte a pasta [`../knowledge/`](../knowledge/index.md).
+**Integrantes:** Zaiden Emiliano Segundo Seleme & Lucas Sousa Santos Oliveira  
+**Branch Git Unificada:** `feat/squad2-dupla1e5`  
+**Liderança Técnica (Tech Lead):** Geovany Aparecido Duarte Câncio  
+**Scrum Master:** Patrick Marangoni Neri da Silva  
+**Product Owner:** Vinícius de Souza Silveira  
 
 ---
 
-### 🏛️ Arquitetura da Solução
+### 📌 1. Escopo e Governança
+A **Squad 2 — Real Time for Business** é responsável pelo processamento distribuído em streaming/micro-lotes sobre o **Azure Data Lake Storage Gen2 (ADLS Gen2)** e o **Azure SQL Server**.
+
+Esta branch unifica integralmente o trabalho das duas frentes de desenvolvimento:
+* **Grupo 1 (Dupla 1):** `ecommerce_produtos` e `ecommerce_categorias` (Catálogo e Taxonomia de Produtos)
+* **Grupo 5 (Dupla 5):** `ecommerce_rastreamento_entregas` e `ecommerce_enderecos` (Logística de Entregas e Inteligência Geográfica)
+
+#### Matriz Oficial de Tabelas da Squad 2:
+| Tabela | Formato de Origem | Chave Primária (PK) | Chave Estrangeira (FK) | Volumetria Tempo Real |
+| :--- | :--- | :--- | :--- | :--- |
+| **`ecommerce_produtos`** | Parquet (`.parquet`) | `sku` | `id_categoria` | 4.800 linhas brutas $\rightarrow$ **2.874 SKUs únicos** |
+| **`ecommerce_categorias`** | Parquet (`.parquet`) | `id_categoria` | `id_categoria_pai` | 810 linhas brutas $\rightarrow$ **135 Categorias únicas** |
+| **`ecommerce_rastreamento_entregas`** | Parquet (`.parquet`) | `id_rastreamento` | `id_pedido_ecommerce` | 3.600 linhas brutas $\rightarrow$ **3.600 Eventos únicos** |
+| **`ecommerce_enderecos`** | Parquet (`.parquet`) | `id_endereco` | `id_cliente` | 4.200 linhas brutas $\rightarrow$ **4.200 Endereços únicos** |
+
+---
+
+### 🏛️ 2. Arquitetura Medallion Ponta a Ponta
 
 ```mermaid
 flowchart TD
-    subgraph Raw ["1. Raw Data Lake (Landing Zone)"]
-        R1["ecommerce_rastreamento.parquet"]
-        R2["ecommerce_enderecos.parquet"]
+    subgraph RAW ["Landing Zone (Container raw)"]
+        R1["ecommerce_produtos.parquet"]
+        R2["ecommerce_categorias.parquet"]
+        R3["ecommerce_rastreamento.parquet"]
+        R4["ecommerce_enderecos.parquet"]
     end
 
-    subgraph Sprint1 ["Sprint 1: Carga Relacional & Data Quality (SQL Server)"]
-        SQL_LOAD["02_carga_sqlserver.ipynb\n(Carga resiliente com fallback pyodbc)"]
-        SQL_AUDIT["03_auditoria_data_quality.ipynb\n(Auditoria de PKs, nulos e domínio)"]
-        SQL_DB[("Azure SQL Server\nsquad2.ecommerce_*")]
+    subgraph BRONZE ["Camada Bronze (Append-Only Delta + Metadados)"]
+        B1["squad2/grupo1/bronze/ecommerce_produtos"]
+        B2["squad2/grupo1/bronze/ecommerce_categorias"]
+        B3["squad2/grupo5/bronze/ecommerce_rastreamento_entregas"]
+        B4["squad2/grupo5/bronze/ecommerce_enderecos"]
+        B_CTRL["squad2/*/metadata/ingestion_control_log"]
     end
 
-    subgraph Bronze ["2. Camada Bronze (Delta Lake - Append Only)"]
-        B_CTRL["squad2/grupo5/metadata/ingestion_control_log"]
-        B1["squad2/grupo5/bronze/ecommerce_rastreamento_entregas\n(particionado por data_particao)"]
-        B2["squad2/grupo5/bronze/ecommerce_enderecos\n(particionado por data_particao)"]
+    subgraph SILVER ["Camada Silver (Curadoria, Limpeza e Upsert)"]
+        S1["squad2/grupo1/silver/ecommerce_produtos"]
+        S2["squad2/grupo1/silver/ecommerce_categorias"]
+        S3["squad2/grupo5/silver/ecommerce_rastreamento_entregas"]
+        S4["squad2/grupo5/silver/ecommerce_enderecos"]
+        Q["squad2/*/quarantine/* (Erros e Violações Técnicas)"]
     end
 
-    subgraph Silver ["3. Camada Silver (Delta Lake - Curated & Upsert)"]
-        S1["squad2/grupo5/silver/ecommerce_rastreamento_entregas"]
-        S2["squad2/grupo5/silver/ecommerce_enderecos"]
-        Q1["squad2/grupo5/quarantine/ecommerce_rastreamento_entregas"]
-        Q2["squad2/grupo5/quarantine/ecommerce_enderecos"]
+    subgraph GOLD ["Camada Gold (Data Marts Analíticos)"]
+        G1["gold_dim_produtos"]
+        G2["gold_metricas_categorias"]
+        G3["gold_logistica_pedidos_rota"]
+        G4["gold_performance_transportadoras"]
+        G5["gold_distribuicao_geografica_clientes"]
     end
 
-    subgraph Gold ["4. Camada Gold (Data Marts Analíticos & Destino Duplo)"]
-        G1["squad2/grupo5/gold/gold_logistica_pedidos_rota"]
-        G2["squad2/grupo5/gold/gold_performance_transportadoras"]
-        G3["squad2/grupo5/gold/gold_distribuicao_geografica_clientes"]
-        SQL_GOLD[("Azure SQL Server (DW)\nsquad2.gold_*")]
+    subgraph DESTINOS ["Destino Duplo (Dual Sink)"]
+        D_LAKE["ADLS Gen2 (Delta Lake ACID)"]
+        D_SQL["Azure SQL Server (Schema squad2)"]
     end
 
-    R1 -->|"Leitura distribuída Spark"| SQL_LOAD
-    R2 -->|"Leitura distribuída Spark"| SQL_LOAD
-    SQL_LOAD --> SQL_DB
-    SQL_DB --> SQL_AUDIT
-
-    R1 -->|"Leitura distribuída + _metadata.file_path"| B_CTRL
-    R2 -->|"Leitura distribuída + _metadata.file_path"| B_CTRL
-    B_CTRL -->|"Anti-join de arquivos inéditos"| B1
-    B_CTRL -->|"Anti-join de arquivos inéditos"| B2
-
-    B1 -->|"Leitura Incremental (Watermark)"| S1
-    B1 -.->|"Falha Técnica (Quarentena)"| Q1
-    B2 -->|"Leitura Incremental (Watermark)"| S2
-    B2 -.->|"Falha Técnica (Quarentena)"| Q2
-
-    S1 -->|"Agregações de Rota & SLA"| G1
-    S1 -->|"Scorecard & Rankings"| G2
-    S2 -->|"Inteligência Geográfica"| G3
-
-    G1 & G2 & G3 -->|"Replicação Analítica"| SQL_GOLD
+    RAW --> BRONZE
+    BRONZE --> SILVER
+    SILVER --> GOLD
+    GOLD --> D_LAKE
+    GOLD --> D_SQL
 ```
 
 ---
 
-### 📂 Estrutura Completa de Notebooks
+### 📁 3. Sequência de Execução dos Notebooks Unificados
 
-| Notebook | Fase / Sprint | Propósito | Destaques Técnicos |
-| :--- | :---: | :--- | :--- |
-| **`00_setup_config.ipynb`** | Setup | Configuração do ambiente | Instalação de bibliotecas Serverless, carga dinâmica do `.env` e validação da conexão OAuth FQDN com o ADLS Gen2. |
-| **`01_extracao_rastreamento_enderecos.ipynb`** | Sprint 1 | Análise exploratória & EDA | Leitura paralela dos arquivos brutos no container `raw`, inferência de schema e validação das chaves primárias. |
-| **`02_carga_sqlserver.ipynb`** | Sprint 1 | Carga relacional no SQL Server | Deduplicação por chave primária e persistência com estratégia tripla (conector nativo `sqlserver`, JDBC e bypass `pyodbc fast_executemany`). |
-| **`03_auditoria_data_quality.ipynb`** | Sprint 1 | Auditoria e Data Quality | Leitura direta do SQL Server, contagem de registros, auditoria de 0 nulos e 0 duplicatas nas PKs e perfilamento de colunas. |
-| **`04_bronze_ingestao_delta.ipynb`** | Sprint 2 | Ingestão incremental Bronze | Pureza absoluta do dado bruto (zero cast/filtro), idempotência via `ingestion_control_log`, metadados de auditoria e particionamento diário. |
-| **`05_silver_limpeza_tratamento.ipynb`** | Sprint 2 | Curadoria, Quarentena e Upsert | Consumo via Watermark temporal, `trim()`, validação de regras com isolamento em Quarentena (`quarantine_reason`), alertas de negócio e persistência atômica via `MERGE INTO` com fallback resiliente. |
-| **`06_gold_metricas_analiticas.ipynb`** | Sprint 3 | Data Marts, KPIs e Destino Duplo | Consumo exclusivo Silver-to-Gold, agregações analíticas (funil de rota, ranking de transportadoras e densidade por UF) com persistência em Delta Lake e replicação relacional no Azure SQL Server. |
+Os notebooks seguem a ordem numérica obrigatória (`00` a `06`) contemplando 100% das 4 tabelas:
 
----
-
-### 📋 Regras Técnicas e de Negócio Implementadas
-
-#### 1. `ecommerce_rastreamento_entregas` (Chave: `id_rastreamento`)
-* **Regra Técnica 1 (Schema Obrigatório):** Verificação de integridade e não-nulidade das chaves (`id_rastreamento`, `id_pedido_ecommerce`, `codigo_rastreio`, `id_transportadora`, `status_entrega`, `dt_evento`).
-* **Regra Técnica 2 (Flow Logístico):** `status_entrega` validado contra a lista oficial: `['coletado', 'em_transito', 'saiu_para_entrega', 'entregue', 'falha_na_entrega', 'retirada_agendada', 'devolvido']`.
-* **Regra Técnica 3 (Temporalidade):** `dt_evento` não pode ser nula nem futura.
-* **Deduplicação Intra-Lote:** `row_number()` particionado por `id_rastreamento` e ordenado por `dt_evento DESC`.
-* **Regras de Negócio & Alertas:**
-  * *KPI (Regra 6):* Quantidade de pedidos que entraram em `'saiu_para_entrega'` no lote.
-  * *Alerta (Regra 8):* Alerta operacional se o mesmo pedido receber evento `'entregue'` repetido.
-  * *KPI (Regra 9):* Top 3 transportadoras com maior volume no micro-lote.
-
-#### 2. `ecommerce_enderecos` (Chave: `id_endereco`)
-* **Regra Técnica 1 (Schema Obrigatório):** Presença obrigatória de `id_endereco`, `id_cliente`, `logradouro`, `cep`, `cidade`, `estado` e `is_principal`.
-* **Regra Técnica 2 (UF Oficial):** Validação estrita do `estado` contra a lista das 27 Unidades Federativas do Brasil.
-* **Regra Técnica 3 (CEP Válido):** Remoção de máscaras e validação de exatamente 8 dígitos numéricos.
-* **Deduplicação Intra-Lote:** `row_number()` particionado por `id_endereco` e ordenado por `bronze_ingested_at DESC`.
-* **Regras de Negócio & Alertas:**
-  * *KPI (Regra 4):* Distribuição geográfica de novos endereços cadastrados por estado.
-  * *Alerta (Regra 5):* Alerta caso um cliente receba `> 3` endereços no mesmo lote.
+```text
+squad2/
+├── 00_setup_config.ipynb               -> Setup do ambiente, injeção OAuth Spark FQDN e teste de conectividade
+├── 01_extracao_distribuida_eda.ipynb   -> Extração distribuída dos micro-lotes brutos e EDA unificado das 4 tabelas
+├── 02_carga_sqlserver.ipynb            -> Carga relacional das 4 tabelas no Azure SQL Server (Sprint 1)
+├── 03_auditoria_data_quality.ipynb     -> Auditoria de qualidade e integridade relacional no SQL Server
+├── 04_bronze_ingestao_delta.ipynb      -> Ingestão incremental Bronze append-only com metadados (Sprint 2)
+├── 05_silver_limpeza_tratamento.ipynb  -> Curadoria Silver, Quarentena auditável e Upsert Delta MERGE INTO (Sprint 2)
+├── 06_gold_metricas_analiticas.ipynb   -> 5 Data Marts Gold com KPIs e Destino Duplo (Delta Lake + SQL Server) (Sprint 3)
+└── README.md                           -> Documentação técnica oficial unificada
+```
 
 ---
 
-### 🛡️ Compatibilidade com Databricks Free / Serverless
-1. **Configuração FQDN de Storage**:
-   `fs.azure.account.auth.type.<storage_account>.dfs.core.windows.net = "OAuth"` injetado em cada chamada Spark, contornando a restrição de `spark.conf.set()` global no Serverless.
-2. **Carga SQL Server Resiliente**:
-   Bypass automático com `pyodbc` caso as restrições de DML do Spark Connect bloqueiem a escrita JDBC direta.
-3. **Upsert Resiliente na Silver**:
-   Tentativa nativa com `DeltaTable.merge()`, com chaveamento automático para transação atômica (`left_anti` broadcast + overwrite) caso ocorram restrições de permissão do metastore.
-4. **Prevenção ao Small Files Problem**:
-   Particionamento diário (`data_particao`) e ativação das flags `delta.autoOptimize.optimizeWrite` e `delta.autoOptimize.autoCompact`.
+### 🛡️ 4. Regras Técnicas, de Negócio e Quarentena
+
+| Entidade | Regra | Tipo | Ação em Falha |
+| :--- | :--- | :---: | :--- |
+| `ecommerce_produtos` | $5 < \text{len}(sku) < 60$ e não-nulo | Técnica 1 | Quarentena |
+| `ecommerce_produtos` | $0 < preco\_lista < 5000$ e não-nulo | Técnica 2 | Quarentena |
+| `ecommerce_produtos` | `is_ativo` booleano e não-nulo | Técnica 3 | Quarentena |
+| `ecommerce_produtos` | $> 50$ novos SKUs no micro-lote | Negócio 4 | Alerta de Expansão de Catálogo |
+| `ecommerce_produtos` | `is_ativo == True` com `preco_lista <= 0` | Negócio 5 | Alerta Crítico Operacional |
+| `ecommerce_categorias` | `id_categoria` e `nome_categoria` obrigatórios | Técnica 1 | Quarentena |
+| `ecommerce_categorias` | Alteração na contagem de categorias raiz | Negócio 2 | Alerta de Governança |
+| `ecommerce_rastreamento`| Chaves obrigatórias preenchidas | Técnica 1 | Quarentena |
+| `ecommerce_rastreamento`| `status_entrega` no catálogo oficial (9 status) | Técnica 2 | Quarentena |
+| `ecommerce_rastreamento`| `dt_evento <= current_timestamp()` | Técnica 3 | Quarentena |
+| `ecommerce_enderecos` | Chaves obrigatórias preenchidas | Técnica 1 | Quarentena |
+| `ecommerce_enderecos` | UF válida (pertencente às 27 UFs) | Técnica 2 | Quarentena |
+| `ecommerce_enderecos` | CEP numérico com exatamente 8 dígitos | Técnica 3 | Quarentena |
+
+---
+
+### 📊 5. Data Marts Analíticos da Camada Gold
+
+1. **`gold_dim_produtos`:** Dimensão desnormalizada com categorização hierárquica (categoria pai/filha), faixas mercadológicas de precificação e flag de disponibilidade.
+2. **`gold_metricas_categorias`:** KPIs executivos por categoria (volumetria ativo/inativo, taxa de disponibilidade, ticket médio/mínimo/máximo e desvio padrão).
+3. **`gold_logistica_pedidos_rota`:** Throughput logístico diário (volumes coletados, em trânsito, em rota, entregues, falhas operacionais e taxa de sucesso percentual).
+4. **`gold_performance_transportadoras`:** Scorecard diário e ranking por volume e eficiência operacional de transportadoras (`dense_rank()`).
+5. **`gold_distribuicao_geografica_clientes`:** Inteligência geográfica com penetração de clientes e densidade de endereços por estado (UF).
+
+---
+
+### ⚙️ 6. Resiliência e Soluções Técnicas para Databricks Serverless
+* **Leitor Resiliente Parquet:** Contorna incompatibilidades de inferência com `TIMESTAMP_NANOS` e mismatch `INT32 Null` no Databricks Serverless através de conversão PyArrow.
+* **Injeção OAuth FQDN:** Configuração das credenciais do Service Principal diretamente via `.options(**adls_options)` em cada chamada Spark.
+* **Triplo Fallback de Persistência SQL Server:** Suporte nativo com conector `format("sqlserver")`, fallback via JDBC URL e contingência com `pyodbc` (`fast_executemany`).
+* **Upsert Delta Atômico:** Execução de `DeltaTable.merge()` nativo com fallback atômico via anti-join broadcast para compatibilidade irrestrita.
