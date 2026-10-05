@@ -115,7 +115,19 @@ Documentação técnica oficial e artefatos de entrega da **Squad 2 — Dupla 1*
     * *Categorias:* `id_categoria` e `nome_categoria` obrigatórios.
     * Registros inválidos são segregados em `squad2/grupo1/quarantine/` com `quarantine_reason` e `quarantined_at`.
   * **Alertas de Negócio em Tempo Real:** Alerta para lotes com $> 50$ novos SKUs, alerta crítico para produtos ativos com preço $\le 0$, e monitoramento de categorias raiz.
-  * Gravação dos registros válidos em Delta Silver em modo `append` no namespace `squad2/grupo1/silver/`.
+  * Gravação dos registros válidos em Delta Silver via `MERGE INTO` (Upsert) no namespace `squad2/grupo1/silver/`.
+
+#### 🏆 Sprint 3 (Camada Gold - Modelagem Dimensional, KPIs Analíticos & Dual Sink):
+```text
+06_gold_metricas_analiticas.ipynb
+```
+
+* **Passo 7:** `06_gold_metricas_analiticas.ipynb` (Task 1 — Camada Gold e Destino Duplo)
+  * Consumo estrito da Camada Silver Delta higienizada (`Silver-to-Gold`).
+  * **Dimensão `gold_dim_produtos`:** Visão desnormalizada enriquecida com taxonomia hierárquica (categoria folha e pai), faixas de precificação mercadológica e status comercial.
+  * **Data Mart `gold_metricas_categorias`:** Indicadores consolidados por categoria (volume de SKUs ativos/inativos, taxa de disponibilidade, preço médio/mínimo/máximo, amplitude e diversidade de marcas).
+  * **Auditoria de Data Quality e Fechamento Matemático:** 100% de integridade contábil (`ativos + inativos == cadastrados`) e zero nulos nas chaves primárias.
+  * **Persistência Dupla (*Dual Sink*):** Persistência em Delta Lake (`squad2/grupo1/gold/`) e replicação no Azure SQL Server (`squad2.gold_dim_produtos` e `squad2.gold_metricas_categorias`).
 
 ---
 
@@ -150,6 +162,15 @@ Documentação técnica oficial e artefatos de entrega da **Squad 2 — Dupla 1*
 > * **Tabelas destino:** `squad2.ecommerce_produtos` e `squad2.ecommerce_categorias`.
 > * **Modo de escrita:** `overwrite`.
 > * **Status da Conexão e Carga:** Sucesso.
+
+#### **Task 5: Camada Gold — Modelagem Dimensional, KPIs Analíticos e Destino Duplo**
+> **Camada Gold analítica finalizada com sucesso com persistência dupla (Delta Lake e Azure SQL Server).**
+> * Notebook **`06_gold_metricas_analiticas.ipynb`** implementado consumindo exclusivamente os dados higienizados da Camada Silver (`Silver-to-Gold`).
+> * **Data Marts Criados:**
+>   * **`gold_dim_produtos`:** Dimensão enriquecida com taxonomia hierárquica (categoria folha e pai), faixas de precificação mercadológica e status comercial.
+>   * **`gold_metricas_categorias`:** Agregações executivas por categoria com métricas de sortimento, disponibilidade, preço médio/mín/máx, amplitude e diversidade de marcas.
+> * **Data Quality & Conciliação:** 100% de conformidade no fechamento contábil dos SKUs ativos/inativos e 0 nulos nas chaves primárias.
+> * **Destino Duplo (*Dual Sink*):** Tabelas Delta persistidas em `squad2/grupo1/gold/` e replicadas no Azure SQL Server no schema `squad2` (`squad2.gold_dim_produtos` e `squad2.gold_metricas_categorias`).
 
 ---
 
