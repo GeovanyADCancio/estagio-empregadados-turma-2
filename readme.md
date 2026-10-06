@@ -1,4 +1,34 @@
-# README — Integração entre Azure Data Lake Gen2 e PySpark (Databricks)
+# 🚀 Projeto Estágio ED — Esteira Medallion da Squad 2
+## Real Time for Business (Dupla 1 & Dupla 5 Integradas)
+
+> 📘 **Documentação Oficial da Squad 2:** Consulte [squad2/README.md](squad2/README.md) para a documentação técnica aprofundada da esteira unificada.
+
+---
+
+### 🏛️ Resumo da Esteira Medallion da Squad 2
+
+```mermaid
+flowchart TD
+    RAW["Raw Container (real-time-data)"] -->|"01 / 04 Ingestão Incremental"| BRONZE["Bronze Layer (Delta Lake /squad2/bronze)"]
+    BRONZE -->|"05 Limpeza & Regras de Negócio"| QUARANTINE["Quarentena (Delta Lake /squad2/quarantine)"]
+    BRONZE -->|"05 Upsert Atômico ACID"| SILVER["Silver Layer (Delta Lake /squad2/silver)"]
+    SILVER -->|"06 Agregações & Data Marts"| GOLD_LAKE["Gold Layer (Delta Lake /squad2/gold)"]
+    SILVER -->|"06 Dual-Sink (Modo APPEND)"| SQL_DB["Azure SQL Server (schema squad2)"]
+```
+
+#### Sequência de Execução dos Notebooks (Squad 2):
+1. **[`00_setup_config.ipynb`](squad2/00_setup_config.ipynb)**: Setup do ambiente, injeção de credenciais OAuth Spark FQDN e validação eager de conectividade com Azure ADLS Gen2 e SQL Server.
+2. **[`01_extracao_distribuida_eda.ipynb`](squad2/01_extracao_distribuida_eda.ipynb)**: Extração de amostras com leitor defensivo PyArrow e EDA unificado com profiling estatístico das 4 tabelas de tempo real.
+3. **[`02_carga_sqlserver.ipynb`](squad2/02_carga_sqlserver.ipynb)**: Carga relacional inicial no Azure SQL Server com proteção contra truncamento acidental em lotes vazios.
+4. **[`03_auditoria_data_quality.ipynb`](squad2/03_auditoria_data_quality.ipynb)**: Auditoria de qualidade diretamente no SQL Server via conector nativo `format("sqlserver")` (zero nulos, deduplicação e integridade referencial).
+5. **[`04_bronze_ingestao_delta.ipynb`](squad2/04_bronze_ingestao_delta.ipynb)**: Ingestão incremental Bronze (`append-only`) particionada por data, com watermark de micro-lotes vazios (`quantidade_linhas = 0`) no `_ingestion_control_log`.
+6. **[`05_silver_limpeza_tratamento.ipynb`](squad2/05_silver_limpeza_tratamento.ipynb)**: Curadoria Silver, isolamento de registros anômalos em Quarentena e Upsert atômico ACID via anti-join broadcast + `overwrite`.
+7. **[`06_gold_metricas_analiticas.ipynb`](squad2/06_gold_metricas_analiticas.ipynb)**: Persistência dos 5 Data Marts Analíticos em Destino Duplo (Delta Lake e Azure SQL Server em modo `append`, com resiliência automática de schema).
+
+---
+
+# 📚 Guia de Integração e Onboarding (Tutorial Básico)
+## Integração entre Azure Data Lake Gen2 e PySpark (Databricks)
 
 ## 1. Objetivo
 
