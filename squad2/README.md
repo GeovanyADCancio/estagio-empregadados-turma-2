@@ -12,9 +12,11 @@
 ### 📌 1. Escopo e Governança
 A **Squad 2 — Real Time for Business** é responsável pelo processamento distribuído em streaming/micro-lotes sobre o **Azure Data Lake Storage Gen2 (ADLS Gen2)** e o **Azure SQL Server**.
 
-Esta branch unifica integralmente o trabalho das duas frentes de desenvolvimento:
-* **Grupo 1 (Dupla 1):** `ecommerce_produtos` e `ecommerce_categorias` (Catálogo e Taxonomia de Produtos)
-* **Grupo 5 (Dupla 5):** `ecommerce_rastreamento_entregas` e `ecommerce_enderecos` (Logística de Entregas e Inteligência Geográfica)
+Esta branch unifica integralmente as 4 tabelas de tempo real, persistindo as Delta Tables diretamente na **raiz do contêiner `squad2`** (eliminando a segregação legada por subpastas `/grupo1/` e `/grupo5/`):
+* `ecommerce_produtos` (Catálogo de Produtos)
+* `ecommerce_categorias` (Taxonomia e Árvore de Categorias)
+* `ecommerce_rastreamento_entregas` (Logística de Entregas)
+* `ecommerce_enderecos` (Inteligência Geográfica de Clientes)
 
 #### Matriz Oficial de Tabelas da Squad 2:
 | Tabela | Formato de Origem | Chave Primária (PK) | Chave Estrangeira (FK) | Volumetria Tempo Real |
@@ -26,7 +28,7 @@ Esta branch unifica integralmente o trabalho das duas frentes de desenvolvimento
 
 ---
 
-### 🏛️ 2. Arquitetura Medallion Ponta a Ponta
+### 🏛️ 2. Arquitetura Medallion Ponta a Ponta (Raiz do Contêiner `squad2`)
 
 ```mermaid
 flowchart TD
@@ -37,32 +39,32 @@ flowchart TD
         R4["ecommerce_enderecos.parquet"]
     end
 
-    subgraph BRONZE ["Camada Bronze (Append-Only Delta + Metadados)"]
-        B1["squad2/grupo1/bronze/ecommerce_produtos"]
-        B2["squad2/grupo1/bronze/ecommerce_categorias"]
-        B3["squad2/grupo5/bronze/ecommerce_rastreamento_entregas"]
-        B4["squad2/grupo5/bronze/ecommerce_enderecos"]
-        B_CTRL["squad2/*/metadata/ingestion_control_log"]
+    subgraph BRONZE ["Camada Bronze (Raiz de squad2: append-only)"]
+        B1["squad2/bronze/ecommerce_produtos"]
+        B2["squad2/bronze/ecommerce_categorias"]
+        B3["squad2/bronze/ecommerce_rastreamento_entregas"]
+        B4["squad2/bronze/ecommerce_enderecos"]
+        B_CTRL["squad2/metadata/ingestion_control_log"]
     end
 
-    subgraph SILVER ["Camada Silver (Curadoria, Limpeza e UPSERT)"]
-        S1["squad2/grupo1/silver/ecommerce_produtos"]
-        S2["squad2/grupo1/silver/ecommerce_categorias"]
-        S3["squad2/grupo5/silver/ecommerce_rastreamento_entregas"]
-        S4["squad2/grupo5/silver/ecommerce_enderecos"]
-        Q["squad2/*/quarantine/* (Erros e Violações Técnicas)"]
+    subgraph SILVER ["Camada Silver (Raiz de squad2: UPSERT)"]
+        S1["squad2/silver/ecommerce_produtos"]
+        S2["squad2/silver/ecommerce_categorias"]
+        S3["squad2/silver/ecommerce_rastreamento_entregas"]
+        S4["squad2/silver/ecommerce_enderecos"]
+        Q["squad2/quarantine/* (Erros e Violações Técnicas)"]
     end
 
-    subgraph GOLD ["Camada Gold (Data Marts em Modo APPEND)"]
-        G1["gold_dim_produtos"]
-        G2["gold_metricas_categorias"]
-        G3["gold_logistica_pedidos_rota"]
+    subgraph GOLD ["Camada Gold (Raiz de squad2: Modo APPEND)"]
+        G1["squad2/gold/gold_dim_produtos"]
+        G2["squad2/gold/gold_metricas_categorias"]
+        G3["squad2/gold/gold_logistica_pedidos_rota"]
         G4["gold_performance_transportadoras"]
         G5["gold_distribuicao_geografica_clientes"]
     end
 
     subgraph DESTINOS ["Destino Duplo (Dual Sink) - Modo APPEND"]
-        D_LAKE["ADLS Gen2 (Delta Lake ACID)"]
+        D_LAKE["ADLS Gen2 (Delta Lake ACID na raiz de squad2)"]
         D_SQL["Azure SQL Server (Schema squad2)"]
     end
 
@@ -74,6 +76,7 @@ flowchart TD
 ```
 
 #### Estratégias de Persistência Definidas em Reunião Técnica:
+* **Padronização na Raiz do Contêiner `squad2`:** Todas as camadas residem em `abfss://squad2@{storage_account}.dfs.core.windows.net/` sob pastas estruturais limpas (`/bronze/`, `/silver/`, `/quarantine/`, `/gold/`, `/metadata/`).
 * **Camada Silver (UPSERT):**
   * Utiliza `MERGE INTO` atômico (ou fallback atômico Serverless) indexado pela chave primária de negócio (`sku`, `id_categoria`, `id_rastreamento`, `id_endereco`).
   * Atualiza registros coincidentes e insere novos, eliminando duplicações e garantindo idempotência estrita.
@@ -93,7 +96,7 @@ squad2/
 ├── 01_extracao_distribuida_eda.ipynb   -> Extração distribuída dos micro-lotes brutos e EDA unificado das 4 tabelas
 ├── 02_carga_sqlserver.ipynb            -> Carga relacional das 4 tabelas no Azure SQL Server (Sprint 1)
 ├── 03_auditoria_data_quality.ipynb     -> Auditoria de qualidade e integridade relacional no SQL Server
-├── 04_bronze_ingestao_delta.ipynb      -> Ingestão incremental Bronze append-only com metadados (Sprint 2)
+├── 04_bronze_ingestao_delta.ipynb      -> Ingestão incremental Bronze append-only na raiz de squad2 (Sprint 2)
 ├── 05_silver_limpeza_tratamento.ipynb  -> Curadoria Silver, Quarentena auditável e Upsert Delta MERGE INTO (Sprint 2)
 ├── 06_gold_metricas_analiticas.ipynb   -> 5 Data Marts Gold com KPIs em Modo APPEND no Destino Duplo (Sprint 3)
 └── README.md                           -> Documentação técnica oficial unificada
@@ -136,4 +139,4 @@ squad2/
 * **Injeção OAuth FQDN:** Configuração das credenciais do Service Principal diretamente via `.options(**adls_options)` em cada chamada Spark.
 * **Triplo Fallback de Persistência SQL Server:** Suporte nativo com conector `format("sqlserver")`, fallback via JDBC URL e contingência com `pyodbc` (`fast_executemany` em modo append).
 * **Upsert Delta Atômico na Silver:** Execução de `DeltaTable.merge()` nativo com fallback atômico via anti-join broadcast para compatibilidade irrestrita.
-* **Persistência Append na Gold:** Gravação cumulativa com metadados temporais para auditoria analítica e BI.
+* **Persistência Append na Gold:** Gravação cumulativa na raiz do contêiner `squad2` com metadados temporais para auditoria analítica e BI.
