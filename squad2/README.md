@@ -45,7 +45,7 @@ flowchart TD
         B_CTRL["squad2/*/metadata/ingestion_control_log"]
     end
 
-    subgraph SILVER ["Camada Silver (Curadoria, Limpeza e Upsert)"]
+    subgraph SILVER ["Camada Silver (Curadoria, Limpeza e UPSERT)"]
         S1["squad2/grupo1/silver/ecommerce_produtos"]
         S2["squad2/grupo1/silver/ecommerce_categorias"]
         S3["squad2/grupo5/silver/ecommerce_rastreamento_entregas"]
@@ -53,7 +53,7 @@ flowchart TD
         Q["squad2/*/quarantine/* (Erros e Violações Técnicas)"]
     end
 
-    subgraph GOLD ["Camada Gold (Data Marts Analíticos)"]
+    subgraph GOLD ["Camada Gold (Data Marts em Modo APPEND)"]
         G1["gold_dim_produtos"]
         G2["gold_metricas_categorias"]
         G3["gold_logistica_pedidos_rota"]
@@ -61,7 +61,7 @@ flowchart TD
         G5["gold_distribuicao_geografica_clientes"]
     end
 
-    subgraph DESTINOS ["Destino Duplo (Dual Sink)"]
+    subgraph DESTINOS ["Destino Duplo (Dual Sink) - Modo APPEND"]
         D_LAKE["ADLS Gen2 (Delta Lake ACID)"]
         D_SQL["Azure SQL Server (Schema squad2)"]
     end
@@ -72,6 +72,14 @@ flowchart TD
     GOLD --> D_LAKE
     GOLD --> D_SQL
 ```
+
+#### Estratégias de Persistência Definidas em Reunião Técnica:
+* **Camada Silver (UPSERT):**
+  * Utiliza `MERGE INTO` atômico (ou fallback atômico Serverless) indexado pela chave primária de negócio (`sku`, `id_categoria`, `id_rastreamento`, `id_endereco`).
+  * Atualiza registros coincidentes e insere novos, eliminando duplicações e garantindo idempotência estrita.
+* **Camada Gold (Modo APPEND):**
+  * Persistência em **modo `append`** no **Destino Duplo** (Delta Lake e Azure SQL Server).
+  * Cada execução registra novos snapshots e agregações analíticas carimbadas com `gold_processed_at`, permitindo a **historização temporal de métricas e KPIs** para análise de evolução em relatórios e dashboards.
 
 ---
 
@@ -87,7 +95,7 @@ squad2/
 ├── 03_auditoria_data_quality.ipynb     -> Auditoria de qualidade e integridade relacional no SQL Server
 ├── 04_bronze_ingestao_delta.ipynb      -> Ingestão incremental Bronze append-only com metadados (Sprint 2)
 ├── 05_silver_limpeza_tratamento.ipynb  -> Curadoria Silver, Quarentena auditável e Upsert Delta MERGE INTO (Sprint 2)
-├── 06_gold_metricas_analiticas.ipynb   -> 5 Data Marts Gold com KPIs e Destino Duplo (Delta Lake + SQL Server) (Sprint 3)
+├── 06_gold_metricas_analiticas.ipynb   -> 5 Data Marts Gold com KPIs em Modo APPEND no Destino Duplo (Sprint 3)
 └── README.md                           -> Documentação técnica oficial unificada
 ```
 
@@ -113,7 +121,7 @@ squad2/
 
 ---
 
-### 📊 5. Data Marts Analíticos da Camada Gold
+### 📊 5. Data Marts Analíticos da Camada Gold (Modo Append)
 
 1. **`gold_dim_produtos`:** Dimensão desnormalizada com categorização hierárquica (categoria pai/filha), faixas mercadológicas de precificação e flag de disponibilidade.
 2. **`gold_metricas_categorias`:** KPIs executivos por categoria (volumetria ativo/inativo, taxa de disponibilidade, ticket médio/mínimo/máximo e desvio padrão).
@@ -126,5 +134,6 @@ squad2/
 ### ⚙️ 6. Resiliência e Soluções Técnicas para Databricks Serverless
 * **Leitor Resiliente Parquet:** Contorna incompatibilidades de inferência com `TIMESTAMP_NANOS` e mismatch `INT32 Null` no Databricks Serverless através de conversão PyArrow.
 * **Injeção OAuth FQDN:** Configuração das credenciais do Service Principal diretamente via `.options(**adls_options)` em cada chamada Spark.
-* **Triplo Fallback de Persistência SQL Server:** Suporte nativo com conector `format("sqlserver")`, fallback via JDBC URL e contingência com `pyodbc` (`fast_executemany`).
-* **Upsert Delta Atômico:** Execução de `DeltaTable.merge()` nativo com fallback atômico via anti-join broadcast para compatibilidade irrestrita.
+* **Triplo Fallback de Persistência SQL Server:** Suporte nativo com conector `format("sqlserver")`, fallback via JDBC URL e contingência com `pyodbc` (`fast_executemany` em modo append).
+* **Upsert Delta Atômico na Silver:** Execução de `DeltaTable.merge()` nativo com fallback atômico via anti-join broadcast para compatibilidade irrestrita.
+* **Persistência Append na Gold:** Gravação cumulativa com metadados temporais para auditoria analítica e BI.
