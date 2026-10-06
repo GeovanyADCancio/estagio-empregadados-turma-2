@@ -44,7 +44,7 @@ flowchart TD
         B2["squad2/bronze/ecommerce_categorias"]
         B3["squad2/bronze/ecommerce_rastreamento_entregas"]
         B4["squad2/bronze/ecommerce_enderecos"]
-        B_CTRL["squad2/metadata/ingestion_control_log"]
+        B_CTRL["squad2/metadata/_ingestion_control_log"]
     end
 
     subgraph SILVER ["Camada Silver (Raiz de squad2: UPSERT)"]
