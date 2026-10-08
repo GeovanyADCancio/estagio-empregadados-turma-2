@@ -19,11 +19,11 @@ Esta branch unifica integralmente as 4 tabelas de tempo real, persistindo as Del
 * `ecommerce_enderecos` (Inteligência Geográfica de Clientes)
 
 #### Matriz Oficial de Tabelas da Squad 2:
-| Tabela | Formato de Origem | Chave Primária (PK) | Chave Estrangeira (FK) | Volumetria Tempo Real |
+| Tabela | Formato de Origem | Chave Primária (PK) | Chave Estrangeira (FK) | Volumetria & Schema Evolution |
 | :--- | :--- | :--- | :--- | :--- |
-| **`ecommerce_produtos`** | Parquet (`.parquet`) | `sku` | `id_categoria` | 4.800 linhas brutas $\rightarrow$ **2.874 SKUs únicos** |
+| **`ecommerce_produtos`** | Parquet (`.parquet`) | `sku` | `id_categoria` | 4.800 linhas brutas $\rightarrow$ **2.874 SKUs únicos** (Suporte a Schema Evolution: nova coluna `preco_custo` a partir de 08/10/2026) |
 | **`ecommerce_categorias`** | Parquet (`.parquet`) | `id_categoria` | `id_categoria_pai` | 810 linhas brutas $\rightarrow$ **135 Categorias únicas** |
-| **`ecommerce_rastreamento_entregas`** | Parquet (`.parquet`) | `id_rastreamento` | `id_pedido_ecommerce` | 3.600 linhas brutas $\rightarrow$ **3.600 Eventos únicos** |
+| **`ecommerce_rastreamento_entregas`** | Parquet (`.parquet`) | `id_rastreamento` | `id_pedido_ecommerce` | 3.600 linhas brutas $\rightarrow$ **3.600 Eventos únicos** (Multi-status homologado em 08/10) |
 | **`ecommerce_enderecos`** | Parquet (`.parquet`) | `id_endereco` | `id_cliente` | 4.200 linhas brutas $\rightarrow$ **4.200 Endereços únicos** |
 
 ---
@@ -153,6 +153,8 @@ flowchart TD
 | `ecommerce_produtos` | $5 < \text{len}(sku) < 60$ e não-nulo | **Técnica 1** | Enviado para Quarentena com motivo documentado. |
 | `ecommerce_produtos` | $0 < preco\_lista < 5000$ e não-nulo | **Técnica 2** | Enviado para Quarentena (preços fora de faixa operacional). |
 | `ecommerce_produtos` | `is_ativo` booleano e não-nulo | **Técnica 3** | Enviado para Quarentena se nulo. |
+| `ecommerce_produtos` | `preco_custo <= 0` (quando preenchido) | **Técnica 6** | Enviado para Quarentena com motivo técnico rastreável. |
+| `ecommerce_produtos` | `preco_custo > preco_lista` | **Negócio 7** | **Alerta Operacional Alto** em `gold_alertas_operacionais` (Margem Negativa / Prejuízo). |
 | `ecommerce_produtos` | $> 50$ novos SKUs no micro-lote | **Negócio 4** | **Alerta Operacional Médio** gravado em `gold_alertas_operacionais` (suspeita de carga de teste). |
 | `ecommerce_produtos` | `is_ativo == True` com `preco_lista <= 0` | **Negócio 5** | **Alerta Operacional Crítico** gravado em `gold_alertas_operacionais` (prevenção de prejuízo por bug de pricing). |
 | `ecommerce_categorias` | `id_categoria` e `nome_categoria` obrigatórios | **Técnica 1** | Enviado para Quarentena se nulos ou vazios. |
@@ -177,7 +179,7 @@ flowchart TD
 
 ### 📊 5. Data Marts Analíticos da Camada Gold (Modo Append & Dual Sink)
 
-1. **`gold_dim_produtos`:** Dimensão desnormalizada de produtos com hierarquia completa (categoria pai/filha), faixas mercadológicas de preço (Econômica, Padrão, Premium, Luxo) e flags de disponibilidade.
+1. **`gold_dim_produtos`:** Dimensão desnormalizada de produtos com hierarquia completa (categoria pai/filha), faixas mercadológicas de preço (Econômica, Padrão, Premium, Luxo), indicadores de rentabilidade unitária com base no custo de aquisição (`preco_custo`, `margem_bruta_unitaria`, `margem_lucro_pct`, `status_rentabilidade`) e flags de disponibilidade comercial.
 2. **`gold_metricas_categorias`:** KPIs executivos por categoria e agregação raiz (volumetria ativo/inativo, taxa de disponibilidade percentual, ticket médio/mínimo/máximo e amplitude de preços).
 3. **`gold_logistica_pedidos_rota`:** Throughput diário e funil logístico integrado:
    * Volumes: `total_coletados`, `total_em_transito`, `total_em_rota`, `total_entregues`, `total_falhas`.
