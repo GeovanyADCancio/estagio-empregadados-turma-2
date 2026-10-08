@@ -1,31 +1,12 @@
-# 🚀 Squad 2 - Real Time for Business
+# 🚀 Real-Time Ecommerce Analytics Pipeline
 
+**Squad 2 · Dupla 3**
 
-# 👥 Equipe
+👥 **Eduardo Souza e Aliedson Silva**
 
-Projeto desenvolvido pelo:
+*Programa de Estágio em Engenharia de Dados*
 
-**Squad 2 - Real Time for Business**
-
-**Grupo 3 - Ecommerce Pedidos**
-
-👥 **Eduardo Souza & Aliedson Silva**
-
----
-
-# 📌 Sobre o Projeto
-
-Projeto desenvolvido durante o estágio de Engenharia de Dados, com o objetivo de construir uma plataforma analítica em tempo real para processamento, validação e monitoramento de pedidos de e-commerce.
-
-A solução implementa uma arquitetura Lakehouse utilizando:
-
-- Azure Data Lake Storage Gen2;
-- Databricks;
-- Delta Lake;
-- PySpark;
-- Azure SQL Server.
-
-O pipeline realiza ingestão incremental de micro-lotes, aplicação de regras de qualidade de dados, processamento analítico e geração de indicadores de negócio em tempo real.
+`Azure Data Lake Gen2` · `Databricks Serverless` · `PySpark` · `Delta Lake` · `Azure SQL Server`
 
 ---
 
@@ -236,6 +217,11 @@ As credenciais da solução **não ficam armazenadas no código**. A autenticaç
          BRONZE ──▶ SILVER ──▶ GOLD ─────────────┘
                                    próximo ciclo
 ```
+
+> 🔒 **Uma execução por vez.**
+> - O `06_orquestrador` cria uma trava em `metadata/`. Enquanto ela está ativa, `03`, `04` e `05` rodados à mão se recusam a processar.
+> - A gravação da Bronze leva junto a versão da tabela que ela leu, e o Delta aceita só uma gravação a partir de cada versão. Assim, duas execuções simultâneas não duplicam micro-lotes.
+> - Se mesmo assim um micro-lote aparecer duplicado, a Silver usa só a 1ª ingestão dele. O procedimento de reparo está no fim do `03_ingestao_bronze`.
 
 ### 🧪 Validação
 
