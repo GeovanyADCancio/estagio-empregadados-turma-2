@@ -182,7 +182,7 @@ flowchart TD
 1. **`gold_dim_produtos`:** Dimensão desnormalizada de produtos com hierarquia completa (categoria pai/filha), faixas mercadológicas de preço (Econômica, Padrão, Premium, Luxo), indicadores de rentabilidade unitária com base no custo de aquisição (`preco_custo`, `margem_bruta_unitaria`, `margem_lucro_pct`, `status_rentabilidade`) e flags de disponibilidade comercial.
 2. **`gold_metricas_categorias`:** KPIs executivos por categoria e agregação raiz (volumetria ativo/inativo, taxa de disponibilidade percentual, ticket médio/mínimo/máximo e amplitude de preços).
 3. **`gold_logistica_pedidos_rota`:** Throughput diário e funil logístico integrado:
-   * Volumes: `total_coletados`, `total_em_transito`, `total_em_rota`, `total_entregues`, `total_falhas`.
+   * Volumes por Status: `total_em_separacao`, `total_coletados`, `total_em_transito`, `total_em_rota`, `total_entregues`, `total_falhas`, `total_cancelados`, `total_outros_status`.
    * **Monitoramento Tempo Real (Negócio 6):** `pedidos_em_rota_ultimas_2h`.
    * **Aferição de SLA de 7 dias (Negócio 7):** `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct`.
    * `taxa_sucesso_pct` geral das entregas.
