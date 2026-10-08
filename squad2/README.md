@@ -55,7 +55,7 @@ flowchart TD
         Q["squad2/quarantine/* (Erros e Violações Técnicas)"]
     end
 
-    subgraph GOLD ["Camada Gold (Raiz de squad2: Modo APPEND)"]
+    subgraph GOLD ["Camada Gold (Raiz de squad2: Sincronização / Modo OVERWRITE)"]
         G1["squad2/gold/gold_dim_produtos"]
         G2["squad2/gold/gold_metricas_categorias"]
         G3["squad2/gold/gold_logistica_pedidos_rota"]
@@ -64,7 +64,7 @@ flowchart TD
         G6["squad2/gold/gold_alertas_operacionais"]
     end
 
-    subgraph DESTINOS ["Destino Duplo (Dual Sink) - Modo APPEND"]
+    subgraph DESTINOS ["Destino Duplo (Dual Sink) - Sincronização / Modo OVERWRITE"]
         D_LAKE["ADLS Gen2 (Delta Lake ACID na raiz de squad2)"]
         D_SQL["Azure SQL Server (Schema squad2)"]
     end
@@ -82,9 +82,9 @@ flowchart TD
 * **Padronização Temporal Estrita:** Sessão do Spark e timestamps configurados globalmente no fuso de Brasília (`America/Sao_Paulo` - UTC-3).
 * **Camada Silver (Deduplicação & UPSERT):**
   * Utiliza deduplicação por chave primária de negócio (`sku`, `id_categoria`, `id_rastreamento`, `id_endereco`) e upsert atômico ACID via anti-join broadcast + `unionByName` + `overwrite`, eliminando duplicações e garantindo idempotência irrestrita.
-* **Camada Gold (Destino Duplo em Modo APPEND):**
-  * Persistência em **modo `append`** no **Destino Duplo** (Delta Lake e Azure SQL Server).
-  * Cada execução registra novos snapshots e agregações analíticas carimbadas com `gold_processed_at`, viabilizando a **historização temporal de métricas, KPIs e alertas operacionais** para consumo direto em relatórios e dashboards (Power BI / Grafana).
+* **Camada Gold (Destino Duplo em Sincronização / Modo OVERWRITE):**
+  * Persistência em **modo `overwrite`** no **Destino Duplo** (Delta Lake e Azure SQL Server via `TRUNCATE + INSERT`).
+  * **Mitigação Crítica de Inchaço de Dados:** Em pipelines de streaming/micro-batch, o append cego de dimensões e agregações causava o acúmulo de centenas de milhares de linhas duplicadas (ex: mais de 500.000 linhas repetidas para um catálogo de apenas 2.874 SKUs). A sincronização atômica garante que analistas de BI (Power BI / Looker) consultem números fidedignos e instantâneos, sem distorção métrica.
 
 ---
 
@@ -98,7 +98,7 @@ flowchart TD
     BRONZE -->|"05 Limpeza & Regras de Data Quality"| QUARANTINE["Quarentena (Delta Lake /squad2/quarantine)"]
     BRONZE -->|"05 Upsert Atômico ACID"| SILVER["Silver Layer (Delta Lake /squad2/silver)"]
     SILVER -->|"06 Agregações & Data Marts"| GOLD_LAKE["Gold Layer (Delta Lake /squad2/gold)"]
-    SILVER -->|"06 Dual-Sink (Modo APPEND)"| SQL_DB["Azure SQL Server (schema squad2)"]
+    SILVER -->|"06 Dual-Sink (Sincronização / OVERWRITE)"| SQL_DB["Azure SQL Server (schema squad2)"]
 ```
 
 #### Detalhamento Funcional dos 7 Notebooks:
@@ -141,7 +141,7 @@ flowchart TD
 
 7. **`06_gold_metricas_analiticas.ipynb` (Data Marts, Alertas & Destino Duplo):**
    * Construção de **6 Data Marts Analíticos** de alto valor para BI e governança em tempo real.
-   * **Destino Duplo (Dual-Sink):** gravação simultânea no Delta Lake e no Azure SQL Server em **modo `append`** com historização temporal.
+   * **Destino Duplo (Dual-Sink):** sincronização atômica simultânea no Delta Lake e no Azure SQL Server em **modo `overwrite`** (`TRUNCATE + INSERT`), garantindo tabelas limpas, livres de duplicatas e com performance analítica instantânea.
    * **Resiliência Automática de Schema:** sincronização e alinhamento de colunas com a DDL oficial do SQL Server.
 
 ---
