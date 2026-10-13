@@ -136,9 +136,9 @@ squad2/
 
 | Indicador | Objetivo |
 |---|---|
-| 📦 Volume de pedidos | Monitoramento operacional |
+| 📦 Volume de pedidos (5 min, minuto a minuto; com o pipeline em dia, segue o relógio) | Monitoramento operacional |
 | 💳 Ticket médio | Análise financeira |
-| ❌ Taxa de cancelamento | Identificação de problemas |
+| ❌ Taxa de cancelamento (qualquer janela de 30 min, deslizando a cada 5 min) | Identificação de problemas |
 | 💰 Receita diária | Acompanhamento comercial |
 | 🚨 Alertas | Detecção de anomalias |
 
@@ -159,6 +159,7 @@ squad2/
 | ✔️ `08_verificacao_sqlserver` | Validar a integração com o SQL Server | Conferir tabelas, registros e dados publicados | Garante a comunicação entre Databricks e banco |
 | ⏱️ `09_teste_tempo_real` | Validar o fluxo de ponta a ponta | Testar o processamento, a chegada de arquivos e a latência | Simula o cenário real de operação |
 | 📈 `10_monitoramento_pipeline` | Monitorar a saúde do pipeline | Acompanhar erros, ciclos, latência e qualidade dos dados | Camada de observabilidade operacional |
+| ✅ `11_validacao_camadas` | Validar a entrega camada por camada | Comparar Bronze × raw, Silver × Bronze e Gold × Silver pedido a pedido, recalcular os KPIs, conferir o SQL Server e mostrar a Gold em gráficos | Somente leitura; veredito por requisito do plano e da planilha |
 
 ---
 
@@ -191,6 +192,12 @@ As credenciais da solução **não ficam armazenadas no código**. A autenticaç
 | 🔑 Client Secret |
 | 🔑 Credenciais do SQL Server |
 
+> **Por que Secret Scope, e não `.env`:** as orientações do estágio pedem variáveis de ambiente (`.env`). No Databricks Serverless,
+> um `.env` precisaria existir como arquivo no workspace, ao lado do código. O Secret Scope `mercadata-ecommerce-pedidos` guarda as mesmas
+> 7 chaves (`ADLS_CLIENT_ID`, `ADLS_TENANT_ID`, `ADLS_CLIENT_SECRET`, `SQL_HOST`, `SQL_DATABASE`, `SQL_USERNAME`, `SQL_PASSWORD`) fora de
+> qualquer arquivo, com acesso controlado pelo Databricks, e o valor aparece como `[REDACTED]` se for impresso.
+> Mesmo sem `.env` no projeto, o `.gitignore` mantém `.env`, `.env.*` e `*.env`, como pedem as orientações.
+
 ---
 
 ## 10. ▶️ Fluxo de execução
@@ -218,6 +225,11 @@ As credenciais da solução **não ficam armazenadas no código**. A autenticaç
                                    próximo ciclo
 ```
 
+> ⏰ **Agendamento (Job a cada 15 min).** O `06_orquestrador` roda num Job do Databricks (Workflows → Jobs) a cada 15 minutos, com no máximo
+> uma execução por vez: é o ritmo de atualização do dashboard. Cada execução roda Bronze, Silver e Gold no primeiro ciclo e continua enquanto
+> chegam arquivos. A regra 6 depende disso: com o pipeline em dia e sem pedido novo, o placar dela anda com o relógio, e uma queda do
+> e-commerce no pico (cerca de 15 minutos sem nenhum pedido) vira alerta uns 22 minutos depois do último pedido, desde que a Gold rode durante a queda.
+
 > 🔒 **Uma execução por vez.**
 > - O `06_orquestrador` cria uma trava em `metadata/`. Enquanto ela está ativa, `03`, `04` e `05` rodados à mão se recusam a processar.
 > - A gravação da Bronze leva junto a versão da tabela que ela leu, e o Delta aceita só uma gravação a partir de cada versão. Assim, duas execuções simultâneas não duplicam micro-lotes.
@@ -231,6 +243,7 @@ As credenciais da solução **não ficam armazenadas no código**. A autenticaç
 | ✔️ `08_verificacao_sqlserver` | Para conferir as tabelas publicadas no banco |
 | ⏱️ `09_teste_tempo_real` | Antes e depois de uma janela de tempo real |
 | 📈 `10_monitoramento_pipeline` | A qualquer momento, para ver a saúde do pipeline |
+| ✅ `11_validacao_camadas` | Antes de abrir o PR e depois de cada janela de tempo real, com o orquestrador parado |
 
 ---
 
