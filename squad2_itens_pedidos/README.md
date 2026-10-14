@@ -12,6 +12,7 @@ raw/real-time-data/AAAA/MM/DD/HHMMSS/ecommerce_itens_pedido.parquet
 workspace.squad2.bronze_ecommerce_itens_pedido        Delta, Unity Catalog
         │  05 Silver   (regras T1–T5 e N9, flags)
         │       ◄── squad2/silver/ecommerce_pedidos           (T2: pedido existe; traz dt_pedido)
+        │       ◄── squad2/quarantine/ecommerce_pedidos       (T2: pedido reprovado)
         │       ◄── squad2/silver/ecommerce_produtos          (T4: preço x catálogo)
         ├──────────────► squad2/grupo2/quarantine/ecommerce_itens_pedido   reprovados + motivo
         ├──────────────► squad2/grupo2/waiting/ecommerce_itens_pedido      aguardando o pedido
@@ -71,7 +72,8 @@ junta os itens que estavam esperando o pedido e marca cada regra numa coluna `fl
 | Regra | Coluna | Critério | Destino |
 |---|---|---|---|
 | T1 | `flag_schema` | coluna obrigatória ausente no arquivo ou nula na linha | quarentena |
-| T2 | `flag_sem_pedido` | `id_pedido` não está na Silver de pedidos | espera; quarentena após 24 h |
+| T2 | `flag_pedido_reprovado` | `id_pedido` está na quarentena de pedidos | quarentena |
+| T2 | `flag_sem_pedido` | `id_pedido` não está nem na Silver nem na quarentena de pedidos | espera; quarentena após 24 h |
 | T3 | `flag_quantidade` | `quantidade` nula ou ≤ 0 | quarentena |
 | T4 | `flag_preco` | `preco_unitario` ≤ 0 ou mais de 60% abaixo do `preco_lista` | quarentena |
 | T5 | `flag_duplicado` | `id_item_pedido` repetido no lote ou já na Silver | quarentena |
@@ -106,8 +108,11 @@ notebook avisa.
 - **Credenciais por chamada.** O Serverless bloqueia `spark.conf.set` para `fs.azure.*`; elas vão em
   `.options(**adls_options)` em cada leitura e escrita do lake. Nenhuma credencial no código.
 - **Tabelas de apoio pela Silver.** Pedidos e produtos são lidos da Silver deles, nunca do `raw`.
-- **Espera em vez de descarte.** Item sem pedido pode ser só defasagem entre notebooks: fica em `waiting/` e é
-  retentado a cada execução por até 24 h.
+- **Espera só para quem pode chegar.** Item de pedido reprovado vai direto para a quarentena (`PEDIDO_REPROVADO`).
+  Item cujo pedido não está em lugar nenhum pode ser defasagem entre notebooks: fica em `waiting/` e é retentado
+  a cada execução por até 24 h.
+- **Reprocessamento.** O widget `reprocessar = true` do `05` relê a Bronze inteira e regrava Silver, quarentena e
+  espera de itens, para aplicar uma regra nova ao histórico sem apagar pasta à mão.
 - **Data de negócio emprestada.** Itens não têm data; a Silver herda `dt_pedido` do pedido para particionar e
   para as janelas dos KPIs.
 - **SQL Server pelo conector nativo `sqlserver`.** O JDBC genérico é bloqueado para escrita no Serverless.
@@ -126,4 +131,4 @@ Lotes de 21/09 a 08/10/2026: 353 lotes, 13.325 itens, 2.222 pedidos, 3.038 SKUs.
 
 - Limiares de N6 (queda de 50%) e N7 (concentração de 30%) são provisórios até a confirmação do negócio.
 - Confirmar onde ficam as Silvers de pedidos e de produtos usadas por T2 e T4.
-- Preencher as seções "Resumo" do `05` e do `06` após rodar com dados reais.
+- Revisar os "Resumo" do `05` e do `06` quando houver novas janelas (escritos com a execução de 13/10).
