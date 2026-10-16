@@ -133,6 +133,7 @@ flowchart TD
    * **Validação de Schema Completo Parquet (Técnica 1):** bloqueio imediato com `ValueError` caso qualquer micro-lote chegue sem campos obrigatórios.
    * **Colunas opcionais ausentes** (ex.: `observacao`, `complemento`) entram como nulas tipadas, evitando que um único arquivo fora do padrão derrube a leitura da tabela.
    * **Falhas não são mascaradas:** só a ausência de arquivos no RAW é tolerada. Erros de autenticação, rede ou permissão interrompem o job nos dois grupos.
+   * **Reconciliação do control log:** arquivos já gravados na Bronze mas sem registro no `_ingestion_control_log` (falha entre as duas gravações) são registrados antes da nova ingestão e não são reingeridos.
    * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1 (leitura distribuída), os vazios são detectados comparando a listagem do RAW com os arquivos já registrados.
    * Metadados técnicos anexados: `bronze_source_file` e `bronze_ingested_at`.
 
@@ -142,10 +143,12 @@ flowchart TD
      * **Normalização de Status de Rastreio (Técnica 2):** conversão para minúsculas e substituição de múltiplos espaços por sublinhado (`regexp_replace(lower(trim(col("status_entrega"))), r"\s+", "_")`).
      * **Tolerância de Clock Skew (Técnica 3):** janela de graça de 10 minutos para timestamps ligeiramente à frente do relógio do servidor (`dt_evento <= current_timestamp() + 10 MINUTES`).
      * **Integridade Referencial Cross-Squad (Técnica 5):** validação contra `silver/ecommerce_pedidos` (Dupla 3). Eventos cujo pedido ainda não está consolidado geram **alerta no log e são preservados**, não vão para a quarentena: a janela de streaming pode trazer o rastreio antes do pedido.
+     * **Fuso horário de `dt_evento`:** o RAW traz horário de Brasília sem fuso. A Bronze preserva o valor como lido; a Silver converte com `to_utc_timestamp(dt_evento, "America/Sao_Paulo")`, alinhando o rastreamento à Silver de pedidos (SLA, KPI das últimas 2h e Técnica 3).
      * **Regras de endereço tolerantes a nulos:** `logradouro`, `estado` e `cep` nulos são reprovados explicitamente.
    * Registros reprovados são desviados para `squad2/quarantine/` com justificativa técnica rastreável.
-   * **Watermark incremental (Silver + Quarentena):** o lote seguinte começa após o maior `bronze_ingested_at` já presente na Silver **ou** na Quarentena, evitando reprocessar e duplicar lotes 100% reprovados. O upsert grava antes da quarentena.
-   * **Upsert Atômico ACID:** deduplicação por chave de negócio preservando o histórico operacional de eventos.
+   * **Watermark incremental (Silver):** o lote seguinte começa após o maior `bronze_ingested_at` já presente na Silver. A quarentena e as ocorrências de endereço são **idempotentes** (ignoram micro-lotes já gravados), então uma falha entre as gravações nunca perde nem duplica registros.
+   * **Upsert Atômico ACID:** deduplicação por chave de negócio mantendo a versão do micro-lote mais recente (`bronze_ingested_at` e, em caso de empate, `bronze_source_file`, cujos caminhos são cronológicos).
+   * **Reprocessamento completo (widget `reprocessar_historico`):** com `true`, ignora o watermark e reconstrói a Silver a partir de todo o histórico da Bronze. É seguro de repetir; deve voltar para `false` após o uso.
    * **Metadados para as regras de negócio da Gold:**
      * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), com backfill automático.
      * `metadata/_snapshot_categorias_raiz`: contagem de categorias raiz a cada execução (Negócio 2).
