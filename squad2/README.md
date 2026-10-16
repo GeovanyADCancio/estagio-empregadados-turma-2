@@ -121,7 +121,7 @@ flowchart TD
 3. **`02_carga_sqlserver.ipynb` (Carga Relacional Inicial):**
    * Persistência inicial das 4 tabelas no catálogo `squad2` do Azure SQL Server.
    * **Proteção contra truncamento acidental:** se o lote bruto estiver vazio, a operação é abortada com segurança preservando o banco.
-   * Suporte nativo ao conector `format("sqlserver")` com contingência via `pyodbc` (`fast_executemany`).
+   * Persistência via conector nativo `format("sqlserver")`, sem Pandas nem `pyodbc`. Falhas de leitura do RAW interrompem a carga em vez de virar "0 registros".
 
 4. **`03_auditoria_data_quality.ipynb` (Auditoria de Qualidade SQL):**
    * Auditoria de integridade relacional diretamente no banco via conector nativo `format("sqlserver")`.
@@ -133,7 +133,7 @@ flowchart TD
    * **Validação de Schema Completo Parquet (Técnica 1):** bloqueio imediato com `ValueError` caso qualquer micro-lote chegue sem campos obrigatórios.
    * **Colunas opcionais ausentes** (ex.: `observacao`, `complemento`) entram como nulas tipadas, evitando que um único arquivo fora do padrão derrube a leitura da tabela.
    * **Falhas não são mascaradas:** só a ausência de arquivos no RAW é tolerada. Erros de autenticação, rede ou permissão interrompem o job nos dois grupos.
-   * **Watermark de Arquivos Vazios no Control Log (Grupo 5):** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1 (leitura distribuída), parquets vazios ainda não são registrados.
+   * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1 (leitura distribuída), os vazios são detectados comparando a listagem do RAW com os arquivos já registrados.
    * Metadados técnicos anexados: `bronze_source_file` e `bronze_ingested_at`.
 
 6. **`05_silver_limpeza_tratamento.ipynb` (Curadoria Silver & Quarentena):**
