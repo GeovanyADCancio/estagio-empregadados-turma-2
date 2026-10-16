@@ -148,7 +148,7 @@ flowchart TD
    * Registros reprovados são desviados para `squad2/quarantine/` com justificativa técnica rastreável.
    * **Watermark incremental (Silver):** o lote seguinte começa após o maior `bronze_ingested_at` já presente na Silver. A quarentena e as ocorrências de endereço são **idempotentes** (ignoram micro-lotes já gravados), então uma falha entre as gravações nunca perde nem duplica registros.
    * **Upsert Atômico ACID:** deduplicação por chave de negócio mantendo a versão do micro-lote mais recente (`bronze_ingested_at` e, em caso de empate, `bronze_source_file`, cujos caminhos são cronológicos).
-   * **Reprocessamento completo (widget `reprocessar_historico`):** com `true`, ignora o watermark e reconstrói a Silver a partir de todo o histórico da Bronze. É seguro de repetir; deve voltar para `false` após o uso.
+   * **Saneamento da Silver de endereços:** a cada execução, registros já gravados que violam as regras técnicas atuais (ex.: CEP nulo, barrado a partir de 16/10/2026) saem da Silver e vão para a quarentena, sem duplicar versões já registradas. Na origem, cerca de 69% das linhas de endereço chegam com CEP nulo; esse ponto foi reportado ao Tech Lead.
    * **Metadados para as regras de negócio da Gold:**
      * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), com backfill automático.
      * `metadata/_snapshot_categorias_raiz`: contagem de categorias raiz a cada execução (Negócio 2).
