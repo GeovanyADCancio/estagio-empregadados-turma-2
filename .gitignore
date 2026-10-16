@@ -14,3 +14,8 @@ second_brain*
 SECOND_BRAIN*
 knowledge/
 scripts/
+# Modelos e temas de dashboards (Looker) - uso local
+dashboard/
+
+# Configuracao local do Claude Code (agents, skills, sdd)
+.claude/
