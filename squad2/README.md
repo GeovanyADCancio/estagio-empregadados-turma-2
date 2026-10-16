@@ -19,12 +19,14 @@ Esta branch unifica integralmente as 4 tabelas de tempo real, persistindo as Del
 * `ecommerce_enderecos` (Inteligência Geográfica de Clientes)
 
 #### Matriz Oficial de Tabelas da Squad 2:
+Volumetria medida em 16/10/2026 (Bronze → Silver).
+
 | Tabela | Formato de Origem | Chave Primária (PK) | Chave Estrangeira (FK) | Volumetria & Schema Evolution |
 | :--- | :--- | :--- | :--- | :--- |
-| **`ecommerce_produtos`** | Parquet (`.parquet`) | `sku` | `id_categoria` | 4.800 linhas brutas $\rightarrow$ **2.874 SKUs únicos** (Suporte a Schema Evolution: nova coluna `preco_custo` a partir de 08/10/2026) |
-| **`ecommerce_categorias`** | Parquet (`.parquet`) | `id_categoria` | `id_categoria_pai` | 810 linhas brutas $\rightarrow$ **135 Categorias únicas** |
-| **`ecommerce_rastreamento_entregas`** | Parquet (`.parquet`) | `id_rastreamento` | `id_pedido_ecommerce` | 3.600 linhas brutas $\rightarrow$ **3.600 Eventos únicos** (Multi-status homologado em 08/10) |
-| **`ecommerce_enderecos`** | Parquet (`.parquet`) | `id_endereco` | `id_cliente` | 4.200 linhas brutas $\rightarrow$ **4.200 Endereços únicos** |
+| **`ecommerce_produtos`** | Parquet (`.parquet`) | `sku` | `id_categoria` | ~1,2 mi linhas na Bronze (cada micro-lote traz o catálogo) $\rightarrow$ **3.805 SKUs únicos** (Schema Evolution: coluna `preco_custo` a partir de 08/10/2026) |
+| **`ecommerce_categorias`** | Parquet (`.parquet`) | `id_categoria` | `id_categoria_pai` | ~88 mil linhas na Bronze $\rightarrow$ **135 categorias únicas** (12 raízes) |
+| **`ecommerce_rastreamento_entregas`** | Parquet (`.parquet`) | `id_rastreamento` | `id_pedido_ecommerce` | 4.979 linhas na Bronze $\rightarrow$ **2.904 eventos únicos** |
+| **`ecommerce_enderecos`** | Parquet (`.parquet`) | `id_endereco` | `id_cliente` | 2.308 linhas na Bronze $\rightarrow$ **1.164 endereços únicos** (origem gera apenas SP, RJ, MG e ES) |
 
 ---
 
@@ -53,6 +55,8 @@ flowchart TD
         S3["squad2/silver/ecommerce_rastreamento_entregas"]
         S4["squad2/silver/ecommerce_enderecos"]
         Q["squad2/quarantine/* (Erros e Violações Técnicas)"]
+        M1["squad2/metadata/_snapshot_categorias_raiz"]
+        M2["squad2/metadata/_ocorrencias_enderecos_por_lote"]
     end
 
     subgraph GOLD ["Camada Gold (Raiz de squad2: Sincronização / Modo OVERWRITE)"]
@@ -127,7 +131,9 @@ flowchart TD
 5. **`04_bronze_ingestao_delta.ipynb` (Ingestão Incremental Bronze):**
    * Ingestão incremental append-only particionada por dia (`data_particao`) diretamente na raiz de `squad2/bronze/`.
    * **Validação de Schema Completo Parquet (Técnica 1):** bloqueio imediato com `ValueError` caso qualquer micro-lote chegue sem campos obrigatórios.
-   * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0`. Nas execuções seguintes, o anti-join os ignora, eliminando custos de I/O desnecessários.
+   * **Colunas opcionais ausentes** (ex.: `observacao`, `complemento`) entram como nulas tipadas, evitando que um único arquivo fora do padrão derrube a leitura da tabela.
+   * **Falhas não são mascaradas:** só a ausência de arquivos no RAW é tolerada. Erros de autenticação, rede ou permissão interrompem o job nos dois grupos.
+   * **Watermark de Arquivos Vazios no Control Log (Grupo 5):** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1 (leitura distribuída), parquets vazios ainda não são registrados.
    * Metadados técnicos anexados: `bronze_source_file` e `bronze_ingested_at`.
 
 6. **`05_silver_limpeza_tratamento.ipynb` (Curadoria Silver & Quarentena):**
@@ -135,14 +141,21 @@ flowchart TD
      * **Sanitização de CEP (Técnica 3):** remoção de caracteres não-numéricos (hífen, pontos), garantindo que CEPs válidos como `"14180-000"` se tornem `"14180000"` com 8 dígitos e não sejam reprovados por falso positivo.
      * **Normalização de Status de Rastreio (Técnica 2):** conversão para minúsculas e substituição de múltiplos espaços por sublinhado (`regexp_replace(lower(trim(col("status_entrega"))), r"\s+", "_")`).
      * **Tolerância de Clock Skew (Técnica 3):** janela de graça de 10 minutos para timestamps ligeiramente à frente do relógio do servidor (`dt_evento <= current_timestamp() + 10 MINUTES`).
-     * **Integridade Referencial Cross-Squad (Técnica 5):** validação contra a tabela `silver/ecommerce_pedidos`, enviando para quarentena eventos de rastreio de pedidos inexistentes.
+     * **Integridade Referencial Cross-Squad (Técnica 5):** validação contra `silver/ecommerce_pedidos` (Dupla 3). Eventos cujo pedido ainda não está consolidado geram **alerta no log e são preservados**, não vão para a quarentena: a janela de streaming pode trazer o rastreio antes do pedido.
+     * **Regras de endereço tolerantes a nulos:** `logradouro`, `estado` e `cep` nulos são reprovados explicitamente.
    * Registros reprovados são desviados para `squad2/quarantine/` com justificativa técnica rastreável.
+   * **Watermark incremental (Silver + Quarentena):** o lote seguinte começa após o maior `bronze_ingested_at` já presente na Silver **ou** na Quarentena, evitando reprocessar e duplicar lotes 100% reprovados. O upsert grava antes da quarentena.
    * **Upsert Atômico ACID:** deduplicação por chave de negócio preservando o histórico operacional de eventos.
+   * **Metadados para as regras de negócio da Gold:**
+     * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), com backfill automático.
+     * `metadata/_snapshot_categorias_raiz`: contagem de categorias raiz a cada execução (Negócio 2).
+     * `metadata/_ocorrencias_enderecos_por_lote`: clientes com mais de 3 endereços distintos no mesmo micro-lote (Negócio 5).
 
 7. **`06_gold_metricas_analiticas.ipynb` (Data Marts, Alertas & Destino Duplo):**
    * Construção de **6 Data Marts Analíticos** de alto valor para BI e governança em tempo real.
    * **Destino Duplo (Dual-Sink):** sincronização atômica simultânea no Delta Lake e no Azure SQL Server em **modo `overwrite`** (`TRUNCATE + INSERT`), garantindo tabelas limpas, livres de duplicatas e com performance analítica instantânea.
-   * **Resiliência Automática de Schema:** sincronização e alinhamento de colunas com a DDL oficial do SQL Server.
+   * **Resiliência Automática de Schema:** alinhamento das colunas com a DDL do SQL Server. Se as colunas mudarem (*schema drift*), a tabela é recriada; caso contrário, mantém `TRUNCATE + INSERT`.
+   * **Alertas determinísticos:** `gold_alertas_operacionais` é recalculada do estado atual a cada execução e sobrescrita **mesmo vazia**, para que alertas resolvidos deixem de aparecer no dashboard.
 
 ---
 
@@ -155,29 +168,29 @@ flowchart TD
 | `ecommerce_produtos` | `is_ativo` booleano e não-nulo | **Técnica 3** | Enviado para Quarentena se nulo. |
 | `ecommerce_produtos` | `preco_custo <= 0` (quando preenchido) | **Técnica 6** | Enviado para Quarentena com motivo técnico rastreável. |
 | `ecommerce_produtos` | `preco_custo > preco_lista` | **Negócio 7** | **Alerta Operacional Alto** em `gold_alertas_operacionais` (Margem Negativa / Prejuízo). |
-| `ecommerce_produtos` | $> 50$ novos SKUs no micro-lote | **Negócio 4** | **Alerta Operacional Médio** gravado em `gold_alertas_operacionais` (suspeita de carga de teste). |
-| `ecommerce_produtos` | `is_ativo == True` com `preco_lista <= 0` | **Negócio 5** | **Alerta Operacional Crítico** gravado em `gold_alertas_operacionais` (prevenção de prejuízo por bug de pricing). |
+| `ecommerce_produtos` | $> 50$ novos SKUs no micro-lote | **Negócio 4** | **Alerta Operacional Médio** em `gold_alertas_operacionais`, calculado pela primeira aparição de cada SKU (`primeiro_lote_arquivo`). A carga inicial do catálogo é excluída. |
+| `ecommerce_produtos` | `is_ativo == True` com `preco_lista <= 0` | **Negócio 5** | **Alerta Operacional Crítico** em `gold_alertas_operacionais`. Como a Técnica 2 barra esses registros, o alerta é lido da **quarentena** de produtos (último registro por SKU, ignorando SKUs já corrigidos na Silver). |
 | `ecommerce_categorias` | `id_categoria` e `nome_categoria` obrigatórios | **Técnica 1** | Enviado para Quarentena se nulos ou vazios. |
-| `ecommerce_categorias` | Alteração na contagem de categorias raiz | **Negócio 2** | **Alerta Operacional Alto** gravado em `gold_alertas_operacionais` (mudança não planejada na taxonomia). |
+| `ecommerce_categorias` | Alteração na contagem de categorias raiz | **Negócio 2** | **Alerta Operacional Alto** em `gold_alertas_operacionais`, comparando as duas últimas execuções registradas em `metadata/_snapshot_categorias_raiz` (raiz = `id_categoria_pai` nulo ou 0). |
 | `ecommerce_rastreamento`| Schema Parquet completo (6 colunas vitais) | **Técnica 1** | Bloqueia pipeline com `ValueError` em Raw/Bronze e quarentena em Silver. |
 | `ecommerce_rastreamento`| `status_entrega` no catálogo oficial (9 status) | **Técnica 2** | Normalizado com regex e enviado para Quarentena se inválido. |
 | `ecommerce_rastreamento`| Data do evento não-futura (+10 min grace period)| **Técnica 3** | Tolerância a clock skew; além disso é enviado para Quarentena. |
 | `ecommerce_rastreamento`| Histórico e granularidade de eventos preservados| **Técnica 4** | Deduplicação por `id_rastreamento` mantendo histórico de movimentações. |
-| `ecommerce_rastreamento`| Integridade referencial com pedidos | **Técnica 5** | Broadcast join com `silver/ecommerce_pedidos`; órfãos enviados para Quarentena. |
+| `ecommerce_rastreamento`| Integridade referencial com pedidos | **Técnica 5** | Broadcast join com `silver/ecommerce_pedidos` (Dupla 3). Eventos sem pedido consolidado geram alerta no log e são **preservados** na Silver. |
 | `ecommerce_rastreamento`| Throughput última milha em tempo real | **Negócio 6** | Métrica `pedidos_em_rota_ultimas_2h` calculada no Data Mart 3. |
 | `ecommerce_rastreamento`| SLA de Entrega $\le$ 7 dias (`dt_evento - dt_pedido`) | **Negócio 7** | Métricas `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct` no Data Mart 3. |
 | `ecommerce_rastreamento`| Evento `'entregue'` duplicado para o mesmo pedido | **Negócio 8** | **Alerta Operacional Alto** gravado em `gold_alertas_operacionais` (bug na integração da transportadora). |
 | `ecommerce_rastreamento`| Ranking Top 3 transportadoras por volume | **Negócio 9** | Coluna `ranking_volume_dia` calculada via `dense_rank()` no Data Mart 4. |
 | `ecommerce_rastreamento`| Encomenda estagnada > 3 dias após `'coletado'` | **Negócio 10** | **Alerta Operacional Crítico** gravado em `gold_alertas_operacionais` (encomenda sumida / perda logística). |
-| `ecommerce_enderecos` | Chaves obrigatórias preenchidas | **Técnica 1** | Enviado para Quarentena se nulas. |
-| `ecommerce_enderecos` | UF válida (pertencente às 27 UFs brasileiras) | **Técnica 2** | Sanitizado com `upper(trim())` e validado contra catálogo das 27 UFs. |
-| `ecommerce_enderecos` | CEP numérico com exatamente 8 dígitos | **Técnica 3** | Sanitização regex `[^0-9]` prévia; se diferente de 8 dígitos vai para Quarentena. |
+| `ecommerce_enderecos` | `id_endereco`, `id_cliente` e `logradouro` preenchidos | **Técnica 1** | Enviado para Quarentena se nulos ou vazios. |
+| `ecommerce_enderecos` | UF válida (pertencente às 27 UFs brasileiras) | **Técnica 2** | Sanitizado com `upper(trim())` e validado contra catálogo das 27 UFs; UF nula vai para Quarentena. |
+| `ecommerce_enderecos` | CEP numérico com exatamente 8 dígitos | **Técnica 3** | Sanitização regex `[^0-9]` prévia; CEP nulo ou diferente de 8 dígitos vai para Quarentena. |
 | `ecommerce_enderecos` | Distribuição geográfica em tempo real | **Negócio 4** | KPI de penetração e densidade por estado no Data Mart 5. |
-| `ecommerce_enderecos` | $> 3$ endereços por cliente no mesmo micro-lote | **Negócio 5** | **Alerta Operacional Alto** gravado em `gold_alertas_operacionais` (violação do gerador / suspeita de fraude). |
+| `ecommerce_enderecos` | $> 3$ endereços distintos por cliente no mesmo micro-lote | **Negócio 5** | **Alerta Operacional Alto** em `gold_alertas_operacionais`, a partir das ocorrências registradas pela Silver em `metadata/_ocorrencias_enderecos_por_lote` (violação do gerador / suspeita de fraude). |
 
 ---
 
-### 📊 5. Data Marts Analíticos da Camada Gold (Modo Append & Dual Sink)
+### 📊 5. Data Marts Analíticos da Camada Gold (Modo Overwrite & Dual Sink)
 
 1. **`gold_dim_produtos`:** Dimensão desnormalizada de produtos com hierarquia completa (categoria pai/filha), faixas mercadológicas de preço (Econômica, Padrão, Premium, Luxo), indicadores de rentabilidade unitária com base no custo de aquisição (`preco_custo`, `margem_bruta_unitaria`, `margem_lucro_pct`, `status_rentabilidade`) e flags de disponibilidade comercial.
 2. **`gold_metricas_categorias`:** KPIs executivos por categoria e agregação raiz (volumetria ativo/inativo, taxa de disponibilidade percentual, ticket médio/mínimo/máximo e amplitude de preços).
@@ -186,12 +199,13 @@ flowchart TD
    * **Monitoramento Tempo Real (Negócio 6):** `pedidos_em_rota_ultimas_2h`.
    * **Aferição de SLA de 7 dias (Negócio 7):** `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct`.
    * `taxa_sucesso_pct` geral das entregas.
-4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`, atendendo ao Negócio 9).
+4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras (`id_transportadora` e `nome_transportadora`) com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`, atendendo ao Negócio 9).
 5. **`gold_distribuicao_geografica_clientes`:** Inteligência geográfica com total de endereços, clientes únicos, endereços principais e taxa de penetração de mercado por UF (atendendo ao Negócio 4 de endereços).
 6. **`gold_alertas_operacionais`:** Tabela analítica de observabilidade contínua para áreas de negócio, prevenção a fraudes e monitoramento de anomalias em tempo real:
    * **Schema Oficial:** `data_alerta`, `dominio`, `regra_negocio`, `chave_entidade`, `valor_detectado`, `severidade`, `gold_processed_at`.
    * **Severidades:** `CRÍTICA`, `ALTA`, `MÉDIA`.
-   * Consolida disparos automáticos das regras: Endereços Negócio 5, Produtos Negócio 4 e 5, Categorias Negócio 2, Rastreamento Negócio 8 e 10.
+   * Consolida disparos automáticos das regras: Endereços Negócio 5, Produtos Negócio 4, 5 e 7, Categorias Negócio 2, Rastreamento Negócio 8 e 10.
+   * Representa o **estado atual**: é recalculada a cada execução e sobrescrita mesmo vazia. A coluna `dominio` permite separar os alertas por página no dashboard.
 
 ---
 
@@ -202,4 +216,4 @@ flowchart TD
 * **Zero RDD & Zero Global Temp Views:** 100% do pipeline opera sobre DataFrames nativos e Catalyst Optimizer.
 * **Gestão Idempotente de Micro-Lotes Vazios:** O `_ingestion_control_log` na Bronze rastreia arquivos sem registros (`quantidade_linhas = 0`), prevenindo releituras em loop.
 * **Upsert Atômico ACID na Silver:** Elimina a necessidade de APIs sujeitas a restrições de cluster, realizando o upsert por anti-join broadcast + `unionByName` + `overwrite` atômico.
-* **Dual Sink com Resiliência de Schema na Gold:** Gravação cumulativa em modo `append` tanto no Delta Lake quanto no Azure SQL Server, com projeção exata das colunas e sincronização com a DDL oficial do banco de dados relacional.
+* **Dual Sink com Resiliência de Schema na Gold:** Sincronização em modo `overwrite` no Delta Lake e no Azure SQL Server (`TRUNCATE + INSERT`), com projeção exata das colunas e recriação da tabela relacional apenas em caso de *schema drift*.
