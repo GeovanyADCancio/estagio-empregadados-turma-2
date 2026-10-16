@@ -134,7 +134,8 @@ flowchart TD
    * **Colunas opcionais ausentes** (ex.: `observacao`, `complemento`) entram como nulas tipadas, evitando que um único arquivo fora do padrão derrube a leitura da tabela.
    * **Falhas não são mascaradas:** só a ausência de arquivos no RAW é tolerada. Erros de autenticação, rede ou permissão interrompem o job nos dois grupos.
    * **Reconciliação do control log:** arquivos já gravados na Bronze mas sem registro no `_ingestion_control_log` (falha entre as duas gravações) são registrados antes da nova ingestão e não são reingeridos.
-   * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1 (leitura distribuída), os vazios são detectados comparando a listagem do RAW com os arquivos já registrados.
+   * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1, o RAW é listado uma única vez (SDK) e o Spark lê apenas os arquivos novos; os que não trazem linhas são os vazios.
+   * **Micro-lotes rejeitados pelo contrato (Grupo 5):** um arquivo sem colunas obrigatórias ou com tipagem incompatível é registrado no control log com `quantidade_linhas = -1` (status `REJECTED`) e não bloqueia os demais arquivos nem a outra tabela. A célula termina com erro listando os rejeitados, uma única vez.
    * Metadados técnicos anexados: `bronze_source_file` e `bronze_ingested_at`.
 
 6. **`05_silver_limpeza_tratamento.ipynb` (Curadoria Silver & Quarentena):**
@@ -146,7 +147,7 @@ flowchart TD
      * **Fuso horário de `dt_evento`:** o RAW traz horário de Brasília sem fuso. A Bronze preserva o valor como lido; a Silver converte com `to_utc_timestamp(dt_evento, "America/Sao_Paulo")`, alinhando o rastreamento à Silver de pedidos (SLA, KPI das últimas 2h e Técnica 3).
      * **Regras de endereço tolerantes a nulos:** `logradouro`, `estado` e `cep` nulos são reprovados explicitamente.
    * Registros reprovados são desviados para `squad2/quarantine/` com justificativa técnica rastreável.
-   * **Watermark incremental (Silver):** o lote seguinte começa após o maior `bronze_ingested_at` já presente na Silver. A quarentena e as ocorrências de endereço são **idempotentes** (ignoram micro-lotes já gravados), então uma falha entre as gravações nunca perde nem duplica registros.
+   * **Watermark incremental explícito (`metadata/_watermark_silver`):** o lote seguinte começa após o maior `bronze_ingested_at` registrado para a tabela. O registro é gravado só depois do upsert; quarentena e ocorrências de endereço (**idempotentes**) são gravadas antes. Assim, uma falha em qualquer ponto nunca perde nem duplica registros, e o watermark não retrocede quando o saneamento remove registros da Silver.
    * **Upsert Atômico ACID:** deduplicação por chave de negócio mantendo a versão do micro-lote mais recente (`bronze_ingested_at` e, em caso de empate, `bronze_source_file`, cujos caminhos são cronológicos).
    * **Saneamento da Silver de endereços:** a cada execução, registros já gravados que violam as regras técnicas atuais (ex.: CEP nulo, barrado a partir de 16/10/2026) saem da Silver e vão para a quarentena, sem duplicar versões já registradas. Na origem, cerca de 69% das linhas de endereço chegam com CEP nulo; esse ponto foi reportado ao Tech Lead.
    * **Metadados para as regras de negócio da Gold:**
@@ -156,7 +157,7 @@ flowchart TD
 
 7. **`06_gold_metricas_analiticas.ipynb` (Data Marts, Alertas & Destino Duplo):**
    * Construção de **6 Data Marts Analíticos** de alto valor para BI e governança em tempo real.
-   * **Destino Duplo (Dual-Sink):** sincronização atômica simultânea no Delta Lake e no Azure SQL Server em **modo `overwrite`** (`TRUNCATE + INSERT`), garantindo tabelas limpas, livres de duplicatas e com performance analítica instantânea.
+   * **Destino Duplo (Dual-Sink):** cada Data Mart é gravado em **modo `overwrite`** no Delta Lake e, em seguida, **lido de volta do Delta** para o Azure SQL Server (`TRUNCATE + INSERT`): as duas cópias são idênticas. Um horário único por execução (`agora()`) é usado em todas as colunas de data/hora da Gold. A escrita no SQL não é atômica: durante a carga a tabela pode aparecer vazia ou parcial.
    * **Resiliência Automática de Schema:** alinhamento das colunas com a DDL do SQL Server. Se as colunas mudarem (*schema drift*), a tabela é recriada; caso contrário, mantém `TRUNCATE + INSERT`.
    * **Alertas determinísticos:** `gold_alertas_operacionais` é recalculada do estado atual a cada execução e sobrescrita **mesmo vazia**, para que alertas resolvidos deixem de aparecer no dashboard.
 
