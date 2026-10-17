@@ -135,7 +135,7 @@ flowchart TD
    * **Falhas não são mascaradas:** só a ausência de arquivos no RAW é tolerada. Erros de autenticação, rede ou permissão interrompem o job nos dois grupos.
    * **Reconciliação do control log:** arquivos já gravados na Bronze mas sem registro no `_ingestion_control_log` (falha entre as duas gravações) são registrados antes da nova ingestão e não são reingeridos.
    * **Watermark de Arquivos Vazios no Control Log:** arquivos com 0 linhas são registrados no `_ingestion_control_log` com `quantidade_linhas = 0` e ignorados nas execuções seguintes. No Grupo 1, o RAW é listado uma única vez (SDK) e o Spark lê apenas os arquivos novos; os que não trazem linhas são os vazios.
-   * **Micro-lotes rejeitados pelo contrato (Grupo 5):** um arquivo sem colunas obrigatórias ou com tipagem incompatível é registrado no control log com `quantidade_linhas = -1` (status `REJECTED`) e não bloqueia os demais arquivos nem a outra tabela. A célula termina com erro listando os rejeitados, uma única vez.
+   * **Micro-lotes rejeitados:** no Grupo 5, um arquivo sem colunas obrigatórias ou com tipagem incompatível; no Grupo 1, um arquivo ilegível como Parquet (isolado lendo os arquivos um a um quando a leitura em lote falha). O rejeitado é registrado no control log com `quantidade_linhas = -1` (status `REJECTED`) e não bloqueia os demais arquivos nem as outras tabelas. A ingestão termina com erro listando os rejeitados, uma única vez.
    * Metadados técnicos anexados: `bronze_source_file` e `bronze_ingested_at`.
 
 6. **`05_silver_limpeza_tratamento.ipynb` (Curadoria Silver & Quarentena):**
@@ -151,7 +151,7 @@ flowchart TD
    * **Upsert Atômico ACID:** deduplicação por chave de negócio mantendo a versão do micro-lote mais recente (`bronze_ingested_at` e, em caso de empate, `bronze_source_file`, cujos caminhos são cronológicos).
    * **Saneamento da Silver de endereços:** a cada execução, registros já gravados que violam as regras técnicas atuais (ex.: CEP nulo, barrado a partir de 16/10/2026) saem da Silver e vão para a quarentena, sem duplicar versões já registradas. Na origem, cerca de 69% das linhas de endereço chegam com CEP nulo; esse ponto foi reportado ao Tech Lead.
    * **Metadados para as regras de negócio da Gold:**
-     * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), com backfill automático.
+     * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), calculado de forma incremental (SKUs existentes mantêm a linhagem da Silver; novos recebem o arquivo mais antigo do lote), com backfill automático a partir da Bronze apenas para SKUs sem linhagem.
      * `metadata/_snapshot_categorias_raiz`: contagem de categorias raiz a cada execução (Negócio 2).
      * `metadata/_ocorrencias_enderecos_por_lote`: clientes com mais de 3 endereços distintos no mesmo micro-lote (Negócio 5).
 
