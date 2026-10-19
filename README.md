@@ -6,8 +6,12 @@ Pipeline de Data Quality para `ecommerce_produtos` e `ecommerce_categorias`, par
 ADLS Gen2 (parquet, snapshots em tempo real) → Databricks (Spark, autenticação OAuth via `.options()`) → camadas Bronze e Silver em **Delta**, gravadas por caminho dentro do container `squad1` do ADLS (não tabela gerenciada por catálogo — cada conta Free Edition tem Unity Catalog isolado, então esse é o único formato que a squad inteira consegue enxergar).
 
 ## Notebooks
-- **`bronze_produtos_categorias`** — lê os micro-lotes do `raw`, sem transformação, adiciona `bronze_ingested_at` e `bronze_source_file`, grava em `squad1/bronze/` particionado por data, idempotente por arquivo.
-- **`silver_produtos_categorias`** — aplica as 20 regras oficiais (técnica + negócio) como coluna booleana por linha (`regra_01_...` a `regra_10_...`), grava em `squad1/silver/` em append.
+- **`01_conexao_adls_gen2`** — setup/teste de conexão com o ADLS Gen2 (container `raw`), referência de como a conexão foi validada.
+- **`02_eda_ecommerce`** — análise exploratória inicial de `ecommerce_produtos` e `ecommerce_categorias`, usada para entender a qualidade dos dados antes de definir as regras.
+- **`03_bronze_produtos_categorias`** — lê os micro-lotes do `raw`, sem transformação, adiciona `bronze_ingested_at` e `bronze_source_file`, grava em `squad1/bronze/` particionado por data, idempotente por arquivo.
+- **`04_silver_produtos_categorias`** — aplica as 20 regras oficiais (técnica + negócio) como coluna booleana por linha (`regra_01_...` a `regra_10_...`), grava em `squad1/silver/` em append.
+- **`05_dq_monitoring_logs`** — gera a tabela de log compartilhada pela squad (`squad1/dq_monitoring_logs`), uma linha por (tabela, regra, arquivo de origem), com status PASS/FAIL e severidade. Append-only e idempotente (pula combinações já existentes).
+- **`06_gold_dq_resumo`** — agrega o log em duas visões: `squad1.gold_dq_resumo_por_regra` (% de falha por regra/dia, lido do log — cobre todas as tabelas da squad) e `squad1.gold_dq_resumo_por_tabela` (% de registros limpos por tabela/hora, lido direto da Silver — só produtos e categorias). Grava em Delta e no SQL Server.
 
 ## Como rodar
 Requer um `.env` na mesma pasta (não versionado) com as credenciais do ADLS. Rodar célula por célula, na ordem: Bronze primeiro, Silver depois.
@@ -20,7 +24,6 @@ Requer um `.env` na mesma pasta (não versionado) com as credenciais do ADLS. Ro
 - **Duas regras com dependência externa, sem inventar valor:** venda nos últimos 90 dias (dados de outra dupla — liberado usar a Bronze deles provisoriamente, trocar por Silver quando publicarem) e contagem de categorias raiz contra `config.py` (valor de referência ainda não informado).
 
 ## Pendente
-- Confirmar destino de `squad1/dq_monitoring_logs` (tabela de log compartilhada pela squad — caminho exato ainda não definido).
 - Consolidar nomenclatura de coluna de regra entre as duplas da squad, hoje não padronizada.
 
 Documentação completa no Notion da squad.
