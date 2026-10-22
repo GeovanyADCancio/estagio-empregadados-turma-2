@@ -184,7 +184,7 @@ flowchart TD
 | `ecommerce_rastreamento`| Data do evento não-futura (+10 min grace period)| **Técnica 3** | Tolerância a clock skew; além disso é enviado para Quarentena. |
 | `ecommerce_rastreamento`| Histórico e granularidade de eventos preservados| **Técnica 4** | Deduplicação por `id_rastreamento` mantendo histórico de movimentações. |
 | `ecommerce_rastreamento`| Integridade referencial com pedidos | **Técnica 5** | Broadcast join com `silver/ecommerce_pedidos` (Dupla 3). Eventos sem pedido consolidado geram alerta no log e são **preservados** na Silver. |
-| `ecommerce_rastreamento`| Throughput última milha em tempo real | **Negócio 6** | Métrica `pedidos_em_rota_ultimas_2h` calculada no Data Mart 3. |
+| `ecommerce_rastreamento`| Throughput última milha em tempo real | **Negócio 6** | Métrica `pedidos_em_rota_ultimas_2h` calculada no Data Mart 3: pedidos distintos (não eventos) que entraram em `saiu_para_entrega` nas últimas 2 horas. |
 | `ecommerce_rastreamento`| SLA de Entrega $\le$ 7 dias (`dt_evento - dt_pedido`) | **Negócio 7** | Métricas `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct` no Data Mart 3. |
 | `ecommerce_rastreamento`| Evento `'entregue'` duplicado para o mesmo pedido | **Negócio 8** | **Alerta Operacional Alto** gravado em `gold_alertas_operacionais` (bug na integração da transportadora). |
 | `ecommerce_rastreamento`| Top 3 transportadoras com mais eventos no micro-lote atual | **Negócio 9** | Data Mart 7 (`gold_top3_transportadoras_lote`): ranking por número de eventos no micro-lote mais recente da Silver, com participação percentual no lote. |
@@ -203,7 +203,7 @@ flowchart TD
 2. **`gold_metricas_categorias`:** KPIs executivos por categoria e agregação raiz (volumetria ativo/inativo, taxa de disponibilidade percentual, ticket médio/mínimo/máximo e amplitude de preços).
 3. **`gold_logistica_pedidos_rota`:** Throughput diário e funil logístico integrado:
    * Volumes por Status: `total_em_separacao`, `total_coletados`, `total_em_transito`, `total_em_rota`, `total_entregues`, `total_falhas`, `total_cancelados`, `total_outros_status`.
-   * **Monitoramento Tempo Real (Negócio 6):** `pedidos_em_rota_ultimas_2h`.
+   * **Monitoramento Tempo Real (Negócio 6):** `pedidos_em_rota_ultimas_2h` (pedidos distintos, não eventos).
    * **Aferição de SLA de 7 dias (Negócio 7):** `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct`.
    * `taxa_sucesso_pct` geral das entregas.
 4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras (`id_transportadora` e `nome_transportadora`) com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`).
