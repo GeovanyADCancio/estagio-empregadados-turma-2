@@ -66,6 +66,7 @@ flowchart TD
         G4["squad2/gold/gold_performance_transportadoras"]
         G5["squad2/gold/gold_distribuicao_geografica_clientes"]
         G6["squad2/gold/gold_alertas_operacionais"]
+        G7["squad2/gold/gold_top3_transportadoras_lote"]
     end
 
     subgraph DESTINOS ["Destino Duplo (Dual Sink) - Sincronização / Modo OVERWRITE"]
@@ -158,7 +159,7 @@ flowchart TD
      * `metadata/_ocorrencias_enderecos_por_lote`: clientes com mais de 3 endereços distintos no mesmo micro-lote (Negócio 5).
 
 7. **`06_gold_metricas_analiticas.ipynb` (Data Marts, Alertas & Destino Duplo):**
-   * Construção de **6 Data Marts Analíticos** de alto valor para BI e governança em tempo real.
+   * Construção de **7 Data Marts Analíticos** de alto valor para BI e governança em tempo real.
    * **Destino Duplo (Dual-Sink):** cada Data Mart é gravado em **modo `overwrite`** no Delta Lake e, em seguida, **lido de volta do Delta** para o Azure SQL Server (`TRUNCATE + INSERT`): as duas cópias são idênticas. Um horário único por execução (`agora()`) é usado em todas as colunas de data/hora da Gold. A escrita no SQL não é atômica: durante a carga a tabela pode aparecer vazia ou parcial.
    * **Resiliência Automática de Schema:** alinhamento das colunas com a DDL do SQL Server. Se as colunas mudarem (*schema drift*), a tabela é recriada; caso contrário, mantém `TRUNCATE + INSERT`.
    * **Alertas determinísticos:** `gold_alertas_operacionais` é recalculada do estado atual a cada execução e sobrescrita **mesmo vazia**, para que alertas resolvidos deixem de aparecer no dashboard.
@@ -186,7 +187,7 @@ flowchart TD
 | `ecommerce_rastreamento`| Throughput última milha em tempo real | **Negócio 6** | Métrica `pedidos_em_rota_ultimas_2h` calculada no Data Mart 3. |
 | `ecommerce_rastreamento`| SLA de Entrega $\le$ 7 dias (`dt_evento - dt_pedido`) | **Negócio 7** | Métricas `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct` no Data Mart 3. |
 | `ecommerce_rastreamento`| Evento `'entregue'` duplicado para o mesmo pedido | **Negócio 8** | **Alerta Operacional Alto** gravado em `gold_alertas_operacionais` (bug na integração da transportadora). |
-| `ecommerce_rastreamento`| Ranking Top 3 transportadoras por volume | **Negócio 9** | Coluna `ranking_volume_dia` calculada via `dense_rank()` no Data Mart 4. |
+| `ecommerce_rastreamento`| Top 3 transportadoras com mais eventos no micro-lote atual | **Negócio 9** | Data Mart 7 (`gold_top3_transportadoras_lote`): ranking por número de eventos no micro-lote mais recente da Silver, com participação percentual no lote. |
 | `ecommerce_rastreamento`| Encomenda estagnada > 3 dias após `'coletado'` | **Negócio 10** | **Alerta Operacional Crítico** gravado em `gold_alertas_operacionais` (encomenda sumida / perda logística). |
 | `ecommerce_enderecos` | `id_endereco`, `id_cliente` e `logradouro` preenchidos | **Técnica 1** | Enviado para Quarentena se nulos ou vazios. |
 | `ecommerce_enderecos` | UF válida (pertencente às 27 UFs brasileiras) | **Técnica 2** | Sanitizado com `upper(trim())` e validado contra catálogo das 27 UFs; UF nula vai para Quarentena. |
@@ -205,13 +206,14 @@ flowchart TD
    * **Monitoramento Tempo Real (Negócio 6):** `pedidos_em_rota_ultimas_2h`.
    * **Aferição de SLA de 7 dias (Negócio 7):** `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct`.
    * `taxa_sucesso_pct` geral das entregas.
-4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras (`id_transportadora` e `nome_transportadora`) com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`, atendendo ao Negócio 9).
+4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras (`id_transportadora` e `nome_transportadora`) com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`).
 5. **`gold_distribuicao_geografica_clientes`:** Inteligência geográfica com total de endereços, clientes únicos, endereços principais e taxa de penetração de mercado por UF (atendendo ao Negócio 4 de endereços).
 6. **`gold_alertas_operacionais`:** Tabela analítica de observabilidade contínua para áreas de negócio, prevenção a fraudes e monitoramento de anomalias em tempo real:
    * **Schema Oficial:** `data_alerta`, `dominio`, `regra_negocio`, `chave_entidade`, `valor_detectado`, `severidade`, `gold_processed_at`.
    * **Severidades:** `CRÍTICA`, `ALTA`, `MÉDIA`.
    * Consolida disparos automáticos das regras: Endereços Negócio 5, Produtos Negócio 4, 5 e 7, Categorias Negócio 2, Rastreamento Negócio 8 e 10.
    * Representa o **estado atual**: é recalculada a cada execução e sobrescrita mesmo vazia. A coluna `dominio` permite separar os alertas por página no dashboard.
+7. **`gold_top3_transportadoras_lote`:** Top 3 transportadoras com mais eventos no micro-lote atual (Negócio 9): `lote_janela` (`AAAA/MM/DD/HHMMSS`), `posicao`, `id_transportadora`, `nome_transportadora`, `volume_eventos_lote` e `participacao_lote_pct`. O micro-lote atual é o mais recente com eventos válidos na Silver.
 
 ---
 
