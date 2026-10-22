@@ -1,21 +1,3 @@
 .env
 .env.*
 *.env
-
-# Local agent, documentacao e second brain
-.agent/
-.agent
-DOC/
-doc/
-DOC
-doc
-SECOND_BRAIN.md
-second_brain*
-SECOND_BRAIN*
-knowledge/
-scripts/
-# Modelos e temas de dashboards (Looker) - uso local
-dashboard/
-
-# Configuracao local do Claude Code (agents, skills, sdd)
-.claude/
