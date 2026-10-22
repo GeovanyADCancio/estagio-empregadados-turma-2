@@ -155,6 +155,7 @@ flowchart TD
    * **Saneamento da Silver de endereços:** a cada execução, registros já gravados que violam as regras técnicas atuais (ex.: CEP nulo, barrado a partir de 16/10/2026) saem da Silver e vão para a quarentena, sem duplicar versões já registradas. Na origem, cerca de 69% das linhas de endereço chegam com CEP nulo; esse ponto foi reportado ao Tech Lead.
    * **Metadados para as regras de negócio da Gold:**
      * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de produtos: lote em que cada SKU apareceu pela primeira vez (Negócio 4), calculado de forma incremental (SKUs existentes mantêm a linhagem da Silver; novos recebem o arquivo mais antigo do lote), com backfill automático a partir da Bronze apenas para SKUs sem linhagem.
+     * `primeiro_lote_arquivo` / `primeiro_lote_ingested_at` na Silver de endereços: lote em que cada endereço apareceu pela primeira vez (Negócio 4 de endereços), preservado no upsert; endereços gravados antes da coluna existir usam o arquivo da versão já presente na Silver.
      * `metadata/_snapshot_categorias_raiz`: contagem de categorias raiz a cada execução (Negócio 2).
      * `metadata/_ocorrencias_enderecos_por_lote`: clientes com mais de 3 endereços distintos no mesmo micro-lote (Negócio 5).
 
@@ -192,7 +193,7 @@ flowchart TD
 | `ecommerce_enderecos` | `id_endereco`, `id_cliente` e `logradouro` preenchidos | **Técnica 1** | Enviado para Quarentena se nulos ou vazios. |
 | `ecommerce_enderecos` | UF válida (pertencente às 27 UFs brasileiras) | **Técnica 2** | Sanitizado com `upper(trim())` e validado contra catálogo das 27 UFs; UF nula vai para Quarentena. |
 | `ecommerce_enderecos` | CEP numérico com exatamente 8 dígitos | **Técnica 3** | Sanitização regex `[^0-9]` prévia; CEP nulo ou diferente de 8 dígitos vai para Quarentena. |
-| `ecommerce_enderecos` | Distribuição geográfica em tempo real | **Negócio 4** | KPI de penetração e densidade por estado no Data Mart 5. |
+| `ecommerce_enderecos` | Distribuição geográfica de novos endereços em tempo real | **Negócio 4** | Data Mart 5: `novos_enderecos_lote_atual` e `pct_novos_enderecos_lote_atual` por UF, contando os endereços cujo primeiro micro-lote (`primeiro_lote_arquivo` da Silver) é o mais recente que trouxe endereço inédito; o estoque total por UF continua nas colunas `total_*`. |
 | `ecommerce_enderecos` | $> 3$ endereços distintos por cliente no mesmo micro-lote | **Negócio 5** | **Alerta Operacional Alto** em `gold_alertas_operacionais`, a partir das ocorrências registradas pela Silver em `metadata/_ocorrencias_enderecos_por_lote` (violação do gerador / suspeita de fraude). |
 
 ---
@@ -207,7 +208,7 @@ flowchart TD
    * **Aferição de SLA de 7 dias (Negócio 7):** `total_entregues_no_prazo`, `total_entregues_com_atraso` e `taxa_sla_entrega_pct`.
    * `taxa_sucesso_pct` geral das entregas.
 4. **`gold_performance_transportadoras`:** Scorecard operacional de transportadoras (`id_transportadora` e `nome_transportadora`) com volume movimentado, total de pedidos atendidos, entregas concluídas, falhas e ranking diário (`ranking_volume_dia` com `dense_rank()`).
-5. **`gold_distribuicao_geografica_clientes`:** Inteligência geográfica com total de endereços, clientes únicos, endereços principais e taxa de penetração de mercado por UF (atendendo ao Negócio 4 de endereços).
+5. **`gold_distribuicao_geografica_clientes`:** Inteligência geográfica com total de endereços, clientes únicos, endereços principais e taxa de penetração de mercado por UF, mais a distribuição dos endereços novos do micro-lote atual (`novos_enderecos_lote_atual`, `pct_novos_enderecos_lote_atual`, `lote_janela_novos`), atendendo ao Negócio 4 de endereços.
 6. **`gold_alertas_operacionais`:** Tabela analítica de observabilidade contínua para áreas de negócio, prevenção a fraudes e monitoramento de anomalias em tempo real:
    * **Schema Oficial:** `data_alerta`, `dominio`, `regra_negocio`, `chave_entidade`, `valor_detectado`, `severidade`, `gold_processed_at`.
    * **Severidades:** `CRÍTICA`, `ALTA`, `MÉDIA`.
