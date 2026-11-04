@@ -1,8 +1,4 @@
 # Databricks notebook source
-# /// script
-# [tool.databricks.environment]
-# environment_version = "6"
-# ///
 # MAGIC %md
 # MAGIC ## 🧾 Ficha de identificação
 # MAGIC
@@ -16,7 +12,7 @@
 # MAGIC | **Origem dos dados** | Camada Silver (Delta) — `ecommerce_produtos`, `ecommerce_categorias` e quarentenas |
 # MAGIC | **Destino** | Camada Gold (Delta) + espelho no SQL Server (consumido pelo Looker) |
 # MAGIC | **Motivo** | Calcular os KPIs de negócio de Produtos e Categorias a cada ciclo, para dashboards e tomada de decisão |
-# MAGIC | **Última atualização** | 08/10/2026 |
+# MAGIC | **Última atualização** | 26/10/2026 |
 # MAGIC | **Observações** | O Looker deve ler as tabelas `_atual` para o estado de agora e as tabelas sem `_atual` só para evolução no tempo (têm histórico acumulado por `ciclo_id`) |
 # MAGIC
 # MAGIC ### Histórico de atualizações
@@ -28,6 +24,8 @@
 # MAGIC | 07/10/2026 | Lucas Sousa | Todas as tabelas passam a `append` por `ciclo_id`; adição de `gold_kpi_rejeitados_produtos` |
 # MAGIC | 08/10/2026 | Lucas Sousa | Troca das views SQL Server via `pymssql` (travava o kernel com `SIGABRT`) por tabelas `_atual` regravadas a cada ciclo |
 # MAGIC | 08/10/2026 | Lucas Sousa | KPIs de margem (`preco_custo`), condicionais à coluna existir na Silver |
+# MAGIC | 26/10/2026 | Lucas Sousa | Novo diagnóstico `DEPARTAMENTO`: categoria-pai (que só agrupa subcategorias) deixa de ser classificada como `SEM_SKU` — produto é vinculado à folha, nunca ao departamento |
+# MAGIC | 26/10/2026 | Lucas Sousa | `gold_kpi_qualidade_dados` ganha `pct_rejeicoes` (participação de cada regra no total, calculada em Spark) — evita fazer % no BI |
 # MAGIC
 # MAGIC ---
 
@@ -95,7 +93,7 @@
 # MAGIC   que não existe no escopo Produtos/Categorias). Uma categoria com poucos SKUs caros pode aparecer como A
 # MAGIC   sem vender nada; é um indicador de onde o valor está exposto no catálogo, não de onde está a demanda.
 # MAGIC - **HHI** = Σ (share % de valor por categoria)². Vai de 0 a 10.000; acima de 2.500 indica concentração alta.
-# MAGIC - **Diagnóstico por categoria** — `SEM_SKU`, `SEM_OFERTA_ATIVA`, `CLASSE_A_COM_INATIVOS`, `PRECO_HETEROGENEO` ou `SAUDAVEL`; limites parametrizados na célula de parâmetros.
+# MAGIC - **Diagnóstico por categoria** — `DEPARTAMENTO` (categoria-pai, só agrupa subcategorias), `SEM_SKU`, `SEM_OFERTA_ATIVA`, `CLASSE_A_COM_INATIVOS`, `PRECO_HETEROGENEO` ou `SAUDAVEL`; limites parametrizados na célula de parâmetros.
 # MAGIC - **Shares** são calculados sobre SKUs com categoria válida; SKUs órfãos aparecem em `skus_sem_categoria_valida`.
 # MAGIC - **Ciclo** — cada execução é um ciclo; `ciclo_id` (AAAAMMDDHHMMSS, UTC) é a chave de idempotência dos históricos e da sincronização com o SQL Server.
 # MAGIC
@@ -138,6 +136,7 @@ ROTULOS_FAIXA_PRECO = [
 ESCOPO_CATALOGO = "TODO O CATÁLOGO"
 
 DIAGNOSTICOS = {
+    "DEPARTAMENTO": "Categoria de agrupamento (tem subcategorias): produto é vinculado à subcategoria, não a este nível — diagnóstico não se aplica aqui.",
     "SEM_SKU": "Categoria sem nenhum produto cadastrado: popular ou retirar da navegação.",
     "SEM_OFERTA_ATIVA": "Há produtos, mas nenhum ativo: reativar o sortimento ou descontinuar a categoria.",
     "CLASSE_A_COM_INATIVOS": "Categoria de maior valor com muitos SKUs inativos: priorizar a reativação.",
@@ -145,6 +144,25 @@ DIAGNOSTICOS = {
     "PRECO_HETEROGENEO": "Preços muito dispersos dentro da categoria: revisar política de preço e segmentação.",
     "SAUDAVEL": "Sem ação: oferta ativa e preços consistentes.",
 }
+
+# Rótulo amigável por código de regra/motivo de rejeição — calculado aqui (Spark), não no BI: o
+# conector nativo de SQL Server do Looker Studio não agrupa corretamente campos calculados com
+# CASE sobre colunas de texto (GROUP BY por alias, que o T-SQL não aceita). Nome cru fica como
+# fallback para qualquer código novo que apareça aqui antes de ser mapeado.
+REGRA_LABELS = {
+    "regra1_sku_tamanho": "SKU com tamanho inválido",
+    "regra2_preco_lista_faixa": "Preço fora da faixa permitida (R$ 0 a R$ 5.000)",
+    "regra3_is_ativo_preenchido": "Campo Ativo não preenchido",
+    "regra6_preco_custo_valido": "Preço de custo inválido ou ausente",
+    "regra1_id_categoria_preenchido": "ID da categoria não preenchido",
+    "regra1_nome_categoria_preenchido": "Nome da categoria não preenchido",
+    "motivo_nao_registrado": "Motivo não registrado",
+}
+
+
+def rotulo_regra(coluna_codigo):
+    mapa = F.create_map(*[F.lit(x) for par in REGRA_LABELS.items() for x in par])
+    return F.coalesce(F.element_at(mapa, coluna_codigo), coluna_codigo)
 
 GOLD_KPI_CATALOGO_RESUMO = "gold_kpi_catalogo_resumo"
 GOLD_KPI_CATEGORIA_PERFORMANCE = "gold_kpi_categoria_performance"
@@ -330,6 +348,21 @@ dim_categoria = (
     .join(hierarquia, "id_categoria", "left")
 )
 
+# Departamento = categoria que é pai de outra categoria (aparece em id_categoria_pai de alguém).
+# Produto é vinculado só à subcategoria folha, nunca ao departamento — então um departamento tem
+# qtd_skus = 0 por construção da hierarquia, não por falha de cadastro. Sem esta marcação, o
+# diagnóstico abaixo classificava todo departamento como SEM_SKU (achado em auditoria, 26/10).
+categorias_com_filho = (
+    dim_categoria.select(F.col("id_categoria_pai").alias("id_categoria"))
+    .where(F.col("id_categoria_pai").isNotNull())
+    .distinct()
+    .withColumn("eh_departamento", F.lit(True))
+)
+dim_categoria = (
+    dim_categoria.join(categorias_com_filho, "id_categoria", "left")
+    .withColumn("eh_departamento", F.coalesce(F.col("eh_departamento"), F.lit(False)))
+)
+
 # COMMAND ----------
 
 # MAGIC %md ## Base analítica — produtos × categorias
@@ -420,7 +453,7 @@ acumulado = F.sum("valor_lista_ativo").over(ordem_valor.rowsBetween(Window.unbou
 # parte (não dentro do .withColumn() da cadeia abaixo) porque o ramo condicional em Python quebraria
 # o encadeamento fluente dos .when(). margem_pct_media_ativos é NULL quando nenhum SKU ativo da
 # categoria tem custo informado, e when() ignora NULL — cai pro próximo ramo normalmente.
-_diagnostico_codigo_expr = F.when(F.col("qtd_skus") == 0, "SEM_SKU").when(F.col("qtd_skus_ativos") == 0, "SEM_OFERTA_ATIVA").when(
+_diagnostico_codigo_expr = F.when(F.col("eh_departamento"), "DEPARTAMENTO").when(F.col("qtd_skus") == 0, "SEM_SKU").when(F.col("qtd_skus_ativos") == 0, "SEM_OFERTA_ATIVA").when(
     (F.col("classe_valor_catalogo") == "A") & (F.col("pct_skus_ativos") < LIMITE_PCT_ATIVOS_CLASSE_A), "CLASSE_A_COM_INATIVOS"
 )
 if SILVER_PRODUTOS_TEM_PRECO_CUSTO:
@@ -469,7 +502,7 @@ colunas_margem = ["custo_total_ativo", "valor_lista_ativo_com_custo", "margem_va
 kpi_categoria_performance = carimbar_ciclo(
     categoria_performance.select(
         "id_categoria", "nome_categoria", "id_categoria_pai", "id_categoria_raiz", "nome_categoria_raiz",
-        "nivel", "hierarquia_status", "qtd_skus", "qtd_skus_ativos", "qtd_skus_inativos", "pct_skus_ativos",
+        "nivel", "hierarquia_status", "eh_departamento", "qtd_skus", "qtd_skus_ativos", "qtd_skus_inativos", "pct_skus_ativos",
         *[F.round(c, 2).alias(c) for c in colunas_preco],
         "coef_variacao_preco", "share_skus_ativos_pct", "share_valor_pct", "ranking_valor",
         "classe_valor_catalogo", "diagnostico_codigo", "diagnostico_acao",
@@ -616,8 +649,8 @@ gravar_delta_gold(GOLD_KPI_FAIXA_PRECO, kpi_faixa_preco)
 # COMMAND ----------
 
 SCHEMA_QUALIDADE = (
-    "tabela STRING, regra STRING, qtd_rejeicoes LONG, qtd_chaves_afetadas LONG, "
-    "qtd_chaves_sem_versao_valida LONG, qtd_rejeicoes_janela LONG"
+    "tabela STRING, regra STRING, regra_nome_amigavel STRING, qtd_rejeicoes LONG, pct_rejeicoes DOUBLE, "
+    "qtd_chaves_afetadas LONG, qtd_chaves_sem_versao_valida LONG, qtd_rejeicoes_janela LONG"
 )
 
 
@@ -647,11 +680,23 @@ def agregar_quarentena(tabela: str, caminho: str, chave: str, silver: DataFrame)
         F.sum(F.when(F.col("data_rejeicao") >= F.lit(janela_inicio), 1).otherwise(0)).alias("qtd_rejeicoes_janela"),
     )
     pendentes = sem_versao.groupBy("regra").agg(F.count_distinct(chave).alias("qtd_chaves_sem_versao_valida"))
+    # pct_rejeicoes: participação de cada regra no total de rejeições DESSA tabela (produtos e
+    # categorias são somadas em janelas separadas via partitionBy — não faz sentido comparar as
+    # duas escalas juntas). Calculado aqui (Spark), não no Looker: BI só lê o número pronto, evita
+    # depender de função de janela/agregação por campo calculado no conector SQL Server.
     por_regra = (
         metricas.join(pendentes, "regra", "left")
         .withColumn("qtd_chaves_sem_versao_valida", F.coalesce(F.col("qtd_chaves_sem_versao_valida"), F.lit(0)))
         .withColumn("tabela", F.lit(tabela))
-        .select("tabela", "regra", "qtd_rejeicoes", "qtd_chaves_afetadas", "qtd_chaves_sem_versao_valida", "qtd_rejeicoes_janela")
+        .withColumn("regra_nome_amigavel", rotulo_regra(F.col("regra")))
+        .withColumn(
+            "pct_rejeicoes",
+            F.round(100 * F.col("qtd_rejeicoes") / F.sum("qtd_rejeicoes").over(Window.partitionBy("tabela")), 1),
+        )
+        .select(
+            "tabela", "regra", "regra_nome_amigavel", "qtd_rejeicoes", "pct_rejeicoes", "qtd_chaves_afetadas",
+            "qtd_chaves_sem_versao_valida", "qtd_rejeicoes_janela",
+        )
     )
 
     q_sem_versao = q.join(chaves_silver, chave, "left_anti")
@@ -717,7 +762,8 @@ def montar_rejeitados_produtos() -> DataFrame | None:
         ultimas.join(vigente, "sku", "left")
         .select(
             "sku", "id_categoria", F.col("preco_lista").cast("double").alias("preco_rejeitado"), "is_ativo",
-            "motivo_rejeicao", "arquivo_origem", "data_ingestao", "data_rejeicao", "preco_vigente_silver",
+            "motivo_rejeicao", rotulo_regra(F.col("motivo_rejeicao")).alias("motivo_rejeicao_amigavel"),
+            "arquivo_origem", "data_ingestao", "data_rejeicao", "preco_vigente_silver",
             F.col("preco_vigente_silver").isNotNull().alias("tem_versao_valida_na_silver"),
         )
     )
