@@ -6,7 +6,7 @@
 
 *Programa de Estágio em Engenharia de Dados*
 
-`Azure Data Lake Gen2` · `Databricks Serverless` · `PySpark` · `Delta Lake` · `Azure SQL Server`
+`Azure Data Lake Gen2` · `Databricks Serverless` · `PySpark` · `Delta Lake` · `Azure SQL Server` · `pandas` · `Machine Learning`
 
 ---
 
@@ -22,7 +22,8 @@
 8. Qualidade dos dados
 9. Segurança
 10. Fluxo de execução
-11. Resultado final
+11. Machine Learning · EDA e engenharia de features (P1)
+12. Resultado final
 
 ---
 
@@ -40,7 +41,8 @@ A solução utiliza uma arquitetura **Lakehouse**, que combina armazenamento, pr
 - 🧹 tratamento de inconsistências;
 - 📊 geração de indicadores de negócio;
 - 📡 monitoramento operacional;
-- 🗄️ disponibilização dos dados no Azure SQL Server.
+- 🗄️ disponibilização dos dados no Azure SQL Server;
+- 🤖 preparação dos dados para Machine Learning (EDA e engenharia de features do P1 · previsão de vendas da tarde).
 
 ---
 
@@ -118,6 +120,10 @@ squad2/
 │   └── ecommerce_pedidos/
 ├── gold/
 │   └── ecommerce_pedidos/
+│       ├── <kpis e alertas>
+│       ├── ml_features_itens_pedido    ← features por pedido (ML)
+│       ├── ml_features_itens_hora      ← features por hora (ML)
+│       └── ml_features_p1_dia          ← features e alvo do P1 por dia (ML)
 └── metadata/
     └── ecommerce_pedidos/
 ```
@@ -160,6 +166,8 @@ squad2/
 | ⏱️ `09_teste_tempo_real` | Validar o fluxo de ponta a ponta | Testar o processamento, a chegada de arquivos e a latência | Simula o cenário real de operação |
 | 📈 `10_monitoramento_pipeline` | Monitorar a saúde do pipeline | Acompanhar erros, ciclos, latência e qualidade dos dados | Camada de observabilidade operacional |
 | ✅ `11_validacao_camadas` | Validar a entrega camada por camada | Comparar Bronze × raw, Silver × Bronze e Gold × Silver pedido a pedido, recalcular os KPIs, conferir o SQL Server e mostrar a Gold em gráficos | Somente leitura; veredito por requisito do plano e da planilha |
+| 🔍 `12_ml_eda_itens` | **ML · Tarefa 1 · Análise exploratória** | Fonte e cobertura do gerador, colunas, qualidade, ligações, fórmula do `valor_total`, distribuições, categorias, padrões manhã × tarde, adequação ao P1 e insights | Não grava dados; relatório em `docs/12_ml_eda_itens/` |
+| 🧮 `13_ml_features_itens` | **ML · Tarefa 2 · Engenharia de features** | Cria e grava 3 tabelas de features na Gold, codifica as categóricas (0/1) e normaliza as numéricas nas tabelas `ml_modelo_*`, analisa os padrões, valida contra as tarefas e a planilha e gera o relatório completo | Rodar depois do `12`; relatório em `docs/13_ml_features_itens/` |
 
 ---
 
@@ -178,6 +186,9 @@ O pipeline possui validações para garantir a confiabilidade dos dados:
 | 📐 Regras de negócio | 🥇 Gold |
 
 > Registros que não passam nas validações vão para a **quarentena** com o motivo da reprovação; nenhum dado é descartado sem registro.
+
+> 🏷️ **Status permitidos (regra 5):** `PROCESSANDO`, `PAGAMENTO APROVADO`, `CANCELADO`, `PENDENTE`, `AGUARDANDO`, `EM SEPARAÇÃO`, `ENVIADO` e `ENTREGUE`.
+> `ERROR` é dado defeituoso e vai para a quarentena. A lista fica no `02_eda_ecommerce` (`STATUS_ESPERADOS`) e chega à Silver pelo contrato da EDA.
 
 ---
 
@@ -245,9 +256,81 @@ As credenciais da solução **não ficam armazenadas no código**. A autenticaç
 | 📈 `10_monitoramento_pipeline` | A qualquer momento, para ver a saúde do pipeline |
 | ✅ `11_validacao_camadas` | Antes de abrir o PR e depois de cada janela de tempo real, com o orquestrador parado |
 
+### 🔧 Quando a lista de status permitidos mudar
+
+| Passo | O que fazer |
+|:---:|---|
+| 1 | Pausar o Job e conferir que o `06_orquestrador` não está rodando |
+| 2 | Ajustar `STATUS_ESPERADOS` no `02_eda_ecommerce` e rodá-lo (publica o contrato novo) |
+| 3 | Rodar o `05_ingestao_gold` e o `11_validacao_camadas`; reativar o Job |
+
+> O que o `04_ingestao_silver` já mandou para a quarentena não volta sozinho: a Silver só lê micro-lotes novos da Bronze. Vale para os micro-lotes que chegarem depois da mudança.
+
 ---
 
-## 11. 🏁 Resultado final
+## 11. 🤖 Machine Learning · EDA e engenharia de features (P1)
+
+Fase de ML em streaming definida na planilha `machine_learning_squad_2`. Para a dupla:
+
+| Item | Definição |
+|---|---|
+| **Problema** | P1 · Previsão de vendas do período da tarde: receita e nº de pedidos entre 12h e 18h, a partir do histórico e do movimento da manhã |
+| **Base da etapa 1** | itens (`ecommerce_itens_pedido`), ligada a pedidos, produtos e categorias |
+| **Modelo** | LightGBM com lags · Modelo B (machine learning), comparado ao SARIMAX da dupla Leandro e Kauan na mesma janela de teste |
+| **Features pedidas** | lags de 1 a 24h, média móvel, hora, dia da semana e mix de categorias |
+| **Métricas** | MAE, WAPE e RMSE contra o baseline "mesma hora do dia anterior" |
+
+### Tarefas da semana
+
+| Tarefa | Onde |
+|---|---|
+| **1 · Análise exploratória (EDA)** — entender se os dados estão adequados, conhecer a tabela e gerar insights para o modelo | `12_ml_eda_itens` |
+| **2 · Engenharia de features** — preparar os dados para o modelo e criar colunas numéricas que ajudem a identificar padrões; transformar categóricas em numéricas e normalizar (orientação do orientador) | `13_ml_features_itens` |
+| **Validação** — cada exigência das tarefas e da planilha, com status | `13_ml_features_itens` · seção 2.8 |
+
+### Tabelas de features (Gold · `squad2/gold/ecommerce_pedidos/`)
+
+| Tabela | Uma linha por | Principais colunas |
+|---|---|---|
+| `ml_features_itens_pedido` | pedido | nº de itens, SKUs, marcas e categorias, valor bruto e líquido, valor médio do item, desconto, preços, % vendido por peso, categoria e marca dominantes, mix, itens inválidos, cesta de SKUs |
+| `ml_features_itens_hora` | data + hora (Brasília) | receita, pedidos, ticket, mix de categorias, lags de 1 a 24h, média móvel, hora, dia da semana |
+| `ml_features_p1_dia` | dia | o que se sabe da manhã até 12h (features) e a receita e os pedidos da tarde (alvo) |
+
+| `ml_modelo_itens_pedido` · `ml_modelo_itens_hora` · `ml_modelo_p1_dia` | as mesmas | **entrada do modelo**: categóricas em 0/1 (one-hot), numéricas padronizadas (média 0, desvio 1), alvos na escala real; média e desvio de cada coluna em `metadata/ecommerce_pedidos/ml_normalizacao_itens.json` |
+
+**Regras:** `valor_total = Σ quantidade × (preço − desconto por unidade)` (o frete fica fora) · receita só de pedidos aprovados na Silver ·
+itens inválidos são marcados, não apagados · hora sem micro-lote fica vazia (dado desconhecido), não zero.
+
+### Relatórios de cada execução
+
+Os relatórios ficam só na pasta `docs/` (não aparecem nos notebooks). Cada etapa traz o que foi feito, o que obtivemos, a interpretação e o impacto no modelo:
+
+```text
+docs/
+├── 12_ml_eda_itens/
+│   ├── relatorio_MM-DD-AAAA_HH-MM-SS.md     EDA (texto e tabelas)
+│   ├── relatorio_MM-DD-AAAA_HH-MM-SS.html   EDA com os gráficos
+│   ├── indice.md                            todas as execuções
+│   └── registro_eda.json                    resultados da EDA usados pelo 13
+└── 13_ml_features_itens/
+    ├── relatorio_MM-DD-AAAA_HH-MM-SS.md     relatório completo: EDA + features + validação + roteiro da apresentação
+    ├── relatorio_MM-DD-AAAA_HH-MM-SS.html   o mesmo conteúdo com os gráficos
+    └── indice.md                            todas as execuções
+```
+
+### Como rodar
+
+| Passo | Notebook | O que faz |
+|:---:|---|---|
+| 1 | 🔍 `12_ml_eda_itens` | Tarefa 1 · EDA da base de itens; grava o relatório da EDA e o `registro_eda.json` |
+| 2 | 🧮 `13_ml_features_itens` | Tarefa 2 · recalcula as features a partir de todo o raw, grava as 3 tabelas (overwrite), valida e gera o relatório completo |
+
+> ⚠️ **Situação atual:** as features e as tabelas para o modelo estão prontas. O modelo (LightGBM) será implementado na próxima semana e a comparação
+> com a outra dupla do P1 vem mais à frente. Para treinar, ainda faltam dias completos (tarde inteira e parte da manhã com micro-lotes). Com dados novos, basta rodar o `12` e o `13` de novo, nessa ordem.
+
+---
+
+## 12. 🏁 Resultado final
 
 O projeto entrega uma solução completa de Engenharia de Dados capaz de:
 
@@ -256,7 +339,8 @@ O projeto entrega uma solução completa de Engenharia de Dados capaz de:
 - ✅ garantir qualidade;
 - 🧭 manter rastreabilidade;
 - 📊 gerar indicadores;
-- 🗄️ disponibilizar dados para análise.
+- 🗄️ disponibilizar dados para análise;
+- 🤖 preparar os dados para Machine Learning.
 
 ```text
    Azure Data Lake Gen2
