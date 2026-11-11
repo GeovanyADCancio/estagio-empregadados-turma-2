@@ -1,0 +1,29 @@
+# Ambiente virtual
+.venv/
+venv/
+
+# Variáveis de ambiente e credenciais
+.env
+.env.*
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Jupyter / Databricks
+.ipynb_checkpoints/
+.databricks/
+
+# VS Code
+.vscode/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
