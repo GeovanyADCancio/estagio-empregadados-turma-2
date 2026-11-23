@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>P2 FP-Growth × Item2Vec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: folha paisagem do one page anterior — cabeçalho, duas metades (Modelo A | Modelo B) com as mesmas linhas, faixa inteira com a comparação no mesmo hold-out */
+:root {
+  --bg: #f4f6f4;
+  --panel: #e6ede8;
+  --panel-strong: #d8e1db;
+  --ink: #17332a;
+  --muted: #4c6158;
+  --rule: #c2cec7;
+  --a: #2f5f80;          /* Modelo A · FP-Growth */
+  --a-soft: #dfe8ef;
+  --b: #23744f;          /* Modelo B · Item2Vec */
+  --b-soft: #dcebe2;
+  --neutral-bar: #9aa8a1;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111a16; --panel: #18241f; --panel-strong: #20302a; --ink: #e3ece7; --muted: #9db1a7; --rule: #2e4039;
+    --a: #7fb0d4; --a-soft: #1b2a35; --b: #6fc79b; --b-soft: #183026; --neutral-bar: #6c7a73; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111a16; --panel: #18241f; --panel-strong: #20302a; --ink: #e3ece7; --muted: #9db1a7; --rule: #2e4039;
+  --a: #7fb0d4; --a-soft: #1b2a35; --b: #6fc79b; --b-soft: #183026; --neutral-bar: #6c7a73; color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45; }
+.page {
+  max-width: 1360px; margin: 0 auto;
+  padding-block: 28px 32px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 16px;
+}
+header { display: grid; gap: 6px; }
+.eyebrow { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--b); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(26px, 3.4vw, 40px); line-height: 1.08; margin: 0; text-wrap: balance; }
+.setup { color: var(--muted); margin: 0; max-width: 95ch; }
+.setup b { color: var(--ink); font-weight: 600; }
+
+.halves { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.half { background: var(--panel); border-radius: 10px; padding: 16px 18px 14px; display: grid; gap: 10px; align-content: start; min-width: 0; border-top: 4px solid var(--tone); }
+.half.a { --tone: var(--a); --tone-soft: var(--a-soft); }
+.half.b { --tone: var(--b); --tone-soft: var(--b-soft); }
+.half-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.half-head h2 { font-family: var(--font-display); font-weight: 700; font-size: 22px; margin: 0; color: var(--tone); }
+.who { font-size: 12.5px; color: var(--muted); }
+.who b { color: var(--ink); font-weight: 600; }
+
+dl.rows { margin: 0; display: grid; grid-template-columns: 9.5em 1fr; border-top: 1px solid var(--rule); }
+dl.rows dt, dl.rows dd { padding: 6px 0; border-bottom: 1px solid var(--rule); margin: 0; }
+dl.rows dt { font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: .02em; color: var(--muted); padding-right: 10px; }
+dl.rows dd { min-width: 0; }
+code { font-family: var(--font-mono); font-size: 12px; background: var(--tone-soft, var(--panel-strong)); padding: 0 4px; border-radius: 3px; overflow-wrap: anywhere; }
+.result { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+.big { font-family: var(--font-display); font-weight: 700; font-size: 26px; line-height: 1; color: var(--tone); font-variant-numeric: tabular-nums; }
+.small { font-size: 12.5px; color: var(--muted); }
+ul.tight { margin: 0; padding-left: 1.1em; display: grid; gap: 2px; }
+
+.compare { background: var(--panel); border-radius: 10px; padding: 16px 18px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px 28px; }
+.compare h3 { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin: 0 0 8px; }
+.chart { display: grid; gap: 7px; }
+.bar-row { display: grid; grid-template-columns: 13.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 13px; }
+.bar-row .label { min-width: 0; }
+.bar-row .val { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 16px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 20% 100%; border-left: 1px solid var(--muted); }
+.fill { position: absolute; left: 0; top: 3px; bottom: 3px; border-radius: 0 2px 2px 0; background: var(--c); }
+.ci { position: absolute; top: 50%; height: 0; border-top: 1.5px solid var(--ink); }
+.ci::before, .ci::after { content: ""; position: absolute; top: -5px; height: 9px; border-left: 1.5px solid var(--ink); }
+.ci::before { left: 0; } .ci::after { right: 0; }
+.axis { display: grid; grid-template-columns: 13.5em 1fr 4.2em; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.axis .ticks { display: flex; justify-content: space-between; }
+.legend { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+table.split { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.split th, table.split td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--rule); }
+table.split th { font-family: var(--font-display); font-weight: 600; color: var(--muted); font-size: 12.5px; }
+table.split td.n { text-align: right; font-family: var(--font-mono); font-size: 12.5px; }
+.verdict { margin-top: 12px; display: grid; gap: 6px; }
+.verdict p { margin: 0; }
+.verdict .lead { font-weight: 600; }
+.dot { display: inline-block; width: .7em; height: .7em; border-radius: 2px; vertical-align: baseline; margin-right: 4px; }
+
+footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 18px; }
+
+@media (max-width: 900px) {
+  .halves, .compare { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  dl.rows { grid-template-columns: 1fr; }
+  dl.rows dt { border-bottom: 0; padding-bottom: 0; }
+  .bar-row, .axis { grid-template-columns: 8.5em 1fr 3.6em; }
+}
+</style>
+<style>body{margin:0}*,*::before,*::after{box-sizing:border-box}@media print{@page{size:A4 landscape;margin:8mm}body{font-size:11.5px}.page{padding-block:0;gap:10px}}</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="eyebrow">Squad 2 · Fase 2 · P2 Recomendação no carrinho · Comparação de modelos</div>
+    <h1>FP-Growth × Item2Vec: qual completa melhor o carrinho?</h1>
+    <p class="setup">Os dois modelos rodaram na <b>mesma prova</b>: treino com as 1.246 cestas mais antigas do stream e teste com as <b>336 cestas mais recentes</b>, cada uma com 1 item removido. A pergunta é se o modelo devolve esse item entre as 5 sugestões (<b>Hit@5</b>). Antes disso, os números de cada um vinham de provas diferentes (29 × 336 cestas) e não eram comparáveis.</p>
+  </header>
+
+  <div class="halves">
+    <section class="half a" aria-labelledby="h-a">
+      <div class="half-head">
+        <h2 id="h-a">Modelo A · FP-Growth</h2>
+        <span class="who">Regras de associação · <b>Lucas Sousa</b></span>
+      </div>
+      <dl class="rows">
+        <dt>Como funciona</dt>
+        <dd>Conta quais SKUs aparecem juntos e gera regras do tipo "quem leva X e Y leva Z", filtradas por suporte, confiança e lift &gt; 1,2. Recomenda em cascata: regra de SKU → regra de categoria → mais vendidos.</dd>
+        <dt>Entradas</dt>
+        <dd><code>id_pedido</code> (a cesta) · <code>sku</code> · <code>id_categoria</code> (camada 2) · hora → período do dia (v2) · <code>freq_venda</code> (último recurso)</dd>
+        <dt>Dado em que vai melhor</dt>
+        <dd>Cestas densas, com pares que se repetem muitas vezes, e catálogo pequeno: cada regra precisa de ocorrências suficientes para existir.</dd>
+        <dt>Resultado</dt>
+        <dd class="result"><span class="big">5,95%</span><span class="small">calibrado: piso de 2 ocorrências, sem segmentar, ordem por confiança · v2 original: 1,49%</span></dd>
+        <dt>Pontos fortes</dt>
+        <dd>Determinístico e explicável: cada sugestão aponta a regra que a gerou. Pipeline com rollback e gate de promoção.</dd>
+        <dt>Limites</dt>
+        <dd><ul class="tight">
+          <li>Com <code>min_support</code> 0,01, não gera nenhuma regra de SKU: o par mais frequente aparece em 6 cestas.</li>
+          <li>Muito sensível ao piso: de 2 para 3 ocorrências, o acerto cai de 5,95% para 2,08%.</li>
+          <li>Cobre 11,6% do catálogo.</li>
+        </ul></dd>
+      </dl>
+    </section>
+
+    <section class="half b" aria-labelledby="h-b">
+      <div class="half-head">
+        <h2 id="h-b">Modelo B · Item2Vec</h2>
+        <span class="who">Embeddings · <b>Zaiden Seleme</b></span>
+      </div>
+      <dl class="rows">
+        <dt>Como funciona</dt>
+        <dd>Word2Vec com a cesta como frase e o SKU como palavra: aprende um vetor por SKU. Recomenda os 5 SKUs mais próximos (cosseno) da média dos vetores do carrinho. Fallback: mais vendidos das subcategorias do carrinho.</dd>
+        <dt>Entradas</dt>
+        <dd><code>id_pedido</code> (a cesta) · <code>sku</code> · subcategoria como palavra extra (v2) · <code>dt_pedido</code> só para separar treino e teste</dd>
+        <dt>Dado em que vai melhor</dt>
+        <dd>Catálogo grande e esparso, com cauda longa: aproxima SKUs que nunca apareceram juntos, mas dividem os mesmos vizinhos.</dd>
+        <dt>Resultado</dt>
+        <dd class="result"><span class="big">6,55%</span><span class="small">v2: 200 épocas e subcategoria como token · média de 10 seeds 6,31% · v1: 4,17%</span></dd>
+        <dt>Pontos fortes</dt>
+        <dd>Maior cobertura do catálogo (18,8%) e resposta própria para 85% dos carrinhos. Os vizinhos seguem a missão de compra (pet, café da manhã, limpeza).</dd>
+        <dt>Limites</dt>
+        <dd><ul class="tight">
+          <li>Varia com a seed (5,9% a 6,9% na v2).</li>
+          <li>Menos explicável que uma regra.</li>
+          <li>Tende a sugerir substitutos da mesma subcategoria.</li>
+          <li>SKU fora do vocabulário (29% do teste) depende do fallback.</li>
+        </ul></dd>
+      </dl>
+    </section>
+  </div>
+
+  <section class="compare" aria-labelledby="h-c">
+    <div>
+      <h3 id="h-c">Hit@5 no mesmo hold-out (336 cestas)</h3>
+      <div class="chart" role="img" aria-label="Hit@5 com intervalo de confiança de 95%: top-5 mais vendidos 1,49%; FP-Growth v2 1,49%; FP-Growth calibrado 5,95%; Item2Vec v1 4,17%; Item2Vec v2 6,55%.">
+        <div class="bar-row"><span class="label">Top-5 mais vendidos</span><div class="track"><div class="fill" style="--c: var(--neutral-bar); width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth v2 (original)</span><div class="track"><div class="fill" style="--c: var(--a); opacity:.55; width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth calibrado</span><div class="track"><div class="fill" style="--c: var(--a); width:59.5%"></div><div class="ci" style="left:39%; width:51%"></div></div><span class="val">5,95%</span></div>
+        <div class="bar-row"><span class="label">Item2Vec v1</span><div class="track"><div class="fill" style="--c: var(--b); opacity:.55; width:41.7%"></div><div class="ci" style="left:25%; width:44%"></div></div><span class="val">4,17%</span></div>
+        <div class="bar-row"><span class="label">Item2Vec v2</span><div class="track"><div class="fill" style="--c: var(--b); width:65.5%"></div><div class="ci" style="left:44%; width:53%"></div></div><span class="val">6,55%</span></div>
+        <div class="axis" aria-hidden="true"><span></span><span class="ticks"><span>0%</span><span>2%</span><span>4%</span><span>6%</span><span>8%</span><span>10%</span></span><span></span></div>
+      </div>
+      <p class="legend">Barra = Hit@5 · traço = intervalo de confiança de 95% (Wilson). Faixas sobrepostas indicam diferença que pode ser ruído.</p>
+    </div>
+
+    <div>
+      <h3>De onde vêm os acertos</h3>
+      <table class="split">
+        <thead><tr><th>Cestas de teste</th><th style="text-align:right"><span class="dot" style="background:var(--a)"></span>FP calibrado</th><th style="text-align:right"><span class="dot" style="background:var(--b)"></span>Item2Vec v2</th><th style="text-align:right">Mais vendidos</th></tr></thead>
+        <tbody>
+          <tr><td>20 que repetem uma cesta do treino</td><td class="n">20</td><td class="n">18</td><td class="n">1</td></tr>
+          <tr><td>316 cestas novas</td><td class="n">0</td><td class="n">4</td><td class="n">4</td></tr>
+        </tbody>
+      </table>
+      <div class="verdict">
+        <p class="lead">Empate técnico no acerto: 22 × 20 cestas, e o teste cesta a cesta não separa os dois (McNemar p = 0,69).</p>
+        <p>Os dois acertam quase só as cestas que repetem o treino. Em cesta nova, nenhum supera os mais vendidos. 35% das cestas de treino são cópias exatas de outra: é preciso confirmar com a squad se isso é recompra ou artefato do gerador de dados.</p>
+        <p><b>Quando usar:</b> FP-Growth onde a regra precisa ser auditável e os produtos giram muito. Item2Vec para cobrir o catálogo e a cauda longa. Próximo passo comum: mais histórico de treino (Silver batch).</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Fontes: notebooks 05 (comparação) e 06 (evolução do Item2Vec), <code>gold/item2vec_holdout</code>, 23/11/2026.</span>
+    <span>FP-Growth reimplementado com a lógica da v2 do Lucas (<code>mlxtend</code>, mesmos limiares).</span>
+    <span>Item2Vec v2: execução local; confirmação no Databricks em andamento.</span>
+  </footer>
+</div>
+</body>
+</html>
