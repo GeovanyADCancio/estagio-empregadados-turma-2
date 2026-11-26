@@ -72,7 +72,8 @@ ul.tight { margin: 0; padding-left: 1.1em; display: grid; gap: 2px; }
 .compare { background: var(--panel); border-radius: 10px; padding: 16px 18px; display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px 28px; }
 .compare h3 { font-family: var(--font-display); font-weight: 700; font-size: 18px; margin: 0 0 8px; }
 .chart { display: grid; gap: 7px; }
-.bar-row { display: grid; grid-template-columns: 13.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 13px; }
+.bar-row { display: grid; grid-template-columns: 13.5em 1fr 4.2em 5.4em; align-items: center; gap: 10px; font-size: 13px; }
+.bar-row.head { font-family: var(--font-display); font-weight: 600; font-size: 12px; color: var(--muted); }
 .bar-row .label { min-width: 0; }
 .bar-row .val { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
 .track { position: relative; height: 16px; background: linear-gradient(to right, var(--rule) 1px, transparent 1px) 0 0 / 20% 100%; border-left: 1px solid var(--muted); }
@@ -80,7 +81,7 @@ ul.tight { margin: 0; padding-left: 1.1em; display: grid; gap: 2px; }
 .ci { position: absolute; top: 50%; height: 0; border-top: 1.5px solid var(--ink); }
 .ci::before, .ci::after { content: ""; position: absolute; top: -5px; height: 9px; border-left: 1.5px solid var(--ink); }
 .ci::before { left: 0; } .ci::after { right: 0; }
-.axis { display: grid; grid-template-columns: 13.5em 1fr 4.2em; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.axis { display: grid; grid-template-columns: 13.5em 1fr 4.2em 5.4em; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .axis .ticks { display: flex; justify-content: space-between; }
 .legend { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
@@ -101,7 +102,7 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
 @media (max-width: 520px) {
   dl.rows { grid-template-columns: 1fr; }
   dl.rows dt { border-bottom: 0; padding-bottom: 0; }
-  .bar-row, .axis { grid-template-columns: 8.5em 1fr 3.6em; }
+  .bar-row, .axis { grid-template-columns: 7.5em 1fr 3.4em 3.8em; gap: 6px; }
 }
 </style>
 <style>body{margin:0}*,*::before,*::after{box-sizing:border-box}@media print{@page{size:A4 landscape;margin:8mm}body{font-size:11.5px}.page{padding-block:0;gap:10px}}</style>
@@ -128,14 +129,14 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
         <dt>Dado em que vai melhor</dt>
         <dd>Cestas densas, com pares que se repetem muitas vezes, e catálogo pequeno: cada regra precisa de ocorrências suficientes para existir.</dd>
         <dt>Resultado</dt>
-        <dd class="result"><span class="big">5,95%</span><span class="small">calibrado: piso de 2 ocorrências, sem segmentar, ordem por confiança · v2 original: 1,49%</span></dd>
+        <dd class="result"><span class="big">3,27%</span><span class="small">v1 (<code>min_support</code> 0,003, sem período), cobertura 9,2% · v2 (<code>min_support</code> 0,01, por período): 1,49% · calibrado no notebook 05: 5,95%</span></dd>
         <dt>Pontos fortes</dt>
         <dd>Determinístico e explicável: cada sugestão aponta a regra que a gerou. Pipeline com rollback e gate de promoção.</dd>
         <dt>Limites</dt>
         <dd><ul class="tight">
-          <li>Com <code>min_support</code> 0,01, não gera nenhuma regra de SKU: o par mais frequente aparece em 6 cestas.</li>
+          <li>Na v2, com <code>min_support</code> 0,01, não gera nenhuma regra de SKU: o par mais frequente aparece em 6 cestas. A cobertura cai de 9,2% (v1) para 1,0%.</li>
           <li>Muito sensível ao piso: de 2 para 3 ocorrências, o acerto cai de 5,95% para 2,08%.</li>
-          <li>Cobre 11,6% do catálogo.</li>
+          <li>Separar por período não aumenta o acerto e reduz a cobertura: cada período fica com poucas cestas.</li>
         </ul></dd>
       </dl>
     </section>
@@ -155,7 +156,7 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
         <dt>Resultado</dt>
         <dd class="result"><span class="big">6,55%</span><span class="small">v2: 200 épocas e subcategoria como token · média de 10 seeds 6,31% · v1: 4,17%</span></dd>
         <dt>Pontos fortes</dt>
-        <dd>Maior cobertura do catálogo (18,8%) e resposta própria para 85% dos carrinhos. Os vizinhos seguem a missão de compra (pet, café da manhã, limpeza).</dd>
+        <dd>Maior cobertura do catálogo (18,7%) e resposta própria para 85% dos carrinhos. Os vizinhos seguem a missão de compra (pet, café da manhã, limpeza).</dd>
         <dt>Limites</dt>
         <dd><ul class="tight">
           <li>Varia com a seed (5,9% a 6,9% na v2).</li>
@@ -169,16 +170,19 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
 
   <section class="compare" aria-labelledby="h-c">
     <div>
-      <h3 id="h-c">Hit@5 no mesmo hold-out (336 cestas)</h3>
-      <div class="chart" role="img" aria-label="Hit@5 com intervalo de confiança de 95%: top-5 mais vendidos 1,49%; FP-Growth v2 1,49%; FP-Growth calibrado 5,95%; Item2Vec v1 4,17%; Item2Vec v2 6,55%.">
-        <div class="bar-row"><span class="label">Top-5 mais vendidos</span><div class="track"><div class="fill" style="--c: var(--neutral-bar); width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span></div>
-        <div class="bar-row"><span class="label">FP-Growth v2 (original)</span><div class="track"><div class="fill" style="--c: var(--a); opacity:.55; width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span></div>
-        <div class="bar-row"><span class="label">FP-Growth calibrado</span><div class="track"><div class="fill" style="--c: var(--a); width:59.5%"></div><div class="ci" style="left:39%; width:51%"></div></div><span class="val">5,95%</span></div>
-        <div class="bar-row"><span class="label">Item2Vec v1</span><div class="track"><div class="fill" style="--c: var(--b); opacity:.55; width:41.7%"></div><div class="ci" style="left:25%; width:44%"></div></div><span class="val">4,17%</span></div>
-        <div class="bar-row"><span class="label">Item2Vec v2</span><div class="track"><div class="fill" style="--c: var(--b); width:65.5%"></div><div class="ci" style="left:44%; width:53%"></div></div><span class="val">6,55%</span></div>
-        <div class="axis" aria-hidden="true"><span></span><span class="ticks"><span>0%</span><span>2%</span><span>4%</span><span>6%</span><span>8%</span><span>10%</span></span><span></span></div>
+      <h3 id="h-c">Tabela única no mesmo hold-out (336 cestas)</h3>
+      <div class="chart" role="img" aria-label="Hit@5 e cobertura do catálogo nas mesmas 336 cestas: top-5 mais vendidos 1,49% e 0,2%; FP-Growth v1 3,27% e 9,2%; FP-Growth v2 por período 1,49% e 1,0%; FP-Growth v2 sem período 1,49% e 1,0%; FP-Growth calibrado 5,95% e 11,6%; Item2Vec v1 4,17% e 17,8%; Item2Vec v2 6,55% e 18,7%.">
+        <div class="bar-row head" aria-hidden="true"><span>Modelo</span><span>Hit@5 e IC 95%</span><span class="val">Hit@5</span><span class="val">Cobertura</span></div>
+        <div class="bar-row"><span class="label">Top-5 mais vendidos (baseline)</span><div class="track"><div class="fill" style="--c: var(--neutral-bar); width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span><span class="val">0,2%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth v1 (anterior)</span><div class="track"><div class="fill" style="--c: var(--a); opacity:.55; width:32.7%"></div><div class="ci" style="left:18%; width:40%"></div></div><span class="val">3,27%</span><span class="val">9,2%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth v2 com período</span><div class="track"><div class="fill" style="--c: var(--a); opacity:.55; width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span><span class="val">1,0%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth v2 sem período</span><div class="track"><div class="fill" style="--c: var(--a); opacity:.55; width:14.9%"></div><div class="ci" style="left:6%; width:28%"></div></div><span class="val">1,49%</span><span class="val">1,0%</span></div>
+        <div class="bar-row"><span class="label">FP-Growth calibrado (nb 05)</span><div class="track"><div class="fill" style="--c: var(--a); width:59.5%"></div><div class="ci" style="left:39%; width:51%"></div></div><span class="val">5,95%</span><span class="val">11,6%</span></div>
+        <div class="bar-row"><span class="label">Item2Vec v1</span><div class="track"><div class="fill" style="--c: var(--b); opacity:.55; width:41.7%"></div><div class="ci" style="left:25%; width:44%"></div></div><span class="val">4,17%</span><span class="val">17,8%</span></div>
+        <div class="bar-row"><span class="label">Item2Vec v2</span><div class="track"><div class="fill" style="--c: var(--b); width:65.5%"></div><div class="ci" style="left:44%; width:53%"></div></div><span class="val">6,55%</span><span class="val">18,7%</span></div>
+        <div class="axis" aria-hidden="true"><span></span><span class="ticks"><span>0%</span><span>2%</span><span>4%</span><span>6%</span><span>8%</span><span>10%</span></span><span></span><span></span></div>
       </div>
-      <p class="legend">Barra = Hit@5 · traço = intervalo de confiança de 95% (Wilson). Faixas sobrepostas indicam diferença que pode ser ruído.</p>
+      <p class="legend">Barra = Hit@5 · traço = intervalo de confiança de 95% (Wilson). Faixas sobrepostas indicam diferença que pode ser ruído. Cobertura = % dos 3.805 SKUs do catálogo que aparecem em alguma recomendação.</p>
     </div>
 
     <div>
@@ -192,6 +196,7 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
       </table>
       <div class="verdict">
         <p class="lead">Empate técnico no acerto: 22 × 20 cestas, e o teste cesta a cesta não separa os dois (McNemar p = 0,69).</p>
+        <p><b>Por que a cobertura do FP-Growth caiu de 9,2% para 1%:</b> o <code>min_support</code> subiu de 0,003 para 0,01 e nenhum par de SKU virou regra. Com e sem divisão por período, a v2 dá o mesmo resultado. Quando existem regras (piso de 2 ocorrências), separar por período mantém o acerto (4,8% × 4,5%) e corta a cobertura pela metade (4,2% × 8,7%).</p>
         <p>Os dois acertam quase só as cestas que repetem o treino. Em cesta nova, nenhum supera os mais vendidos. 35% das cestas de treino são cópias exatas de outra: é preciso confirmar com a squad se isso é recompra ou artefato do gerador de dados.</p>
         <p><b>Quando usar:</b> FP-Growth onde a regra precisa ser auditável e os produtos giram muito. Item2Vec para cobrir o catálogo e a cauda longa. Próximo passo comum: mais histórico de treino (Silver batch).</p>
       </div>
@@ -200,7 +205,7 @@ footer { font-size: 11.5px; color: var(--muted); display: flex; flex-wrap: wrap;
 
   <footer>
     <span>Fontes: notebooks 05 (comparação) e 06 (evolução do Item2Vec), <code>gold/item2vec_holdout</code>, 23/11/2026.</span>
-    <span>FP-Growth reimplementado com a lógica da v2 do Lucas (<code>mlxtend</code>, mesmos limiares).</span>
+    <span>FP-Growth v1: medido pelo Lucas nas mesmas 336 cestas em 13/11 (<code>run_pipeline_ml</code>). FP-Growth v2 e calibrado: reimplementados com a lógica dele no notebook 05 (<code>mlxtend</code>, mesmos limiares).</span>
     <span>Números confirmados na execução dos notebooks no Databricks.</span>
   </footer>
 </div>
